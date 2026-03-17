@@ -1,37 +1,35 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Dashboard — SmartShield CyberAware</title>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Dashboard — SmartShield CyberAware</title>
   <link rel="stylesheet" href="../assets/css/main.css">
   <link rel="stylesheet" href="../assets/css/dashboard.css">
   <link rel="stylesheet" href="../assets/css/components.css">
 </head>
 <body>
+<!--
+  FIX BUG-027: This is a NEW proper employee dashboard.
+  The old file was a copy of the admin dashboard calling initPage('admin'),
+  which caused an infinite redirect loop for employee logins.
+-->
 <div id="toast-container"></div>
 <div class="app-shell">
   <aside class="sidebar" id="sidebar"></aside>
   <div class="main-content">
     <header class="top-header">
-      <div class="header-left"><span class="page-title">Admin Dashboard</span></div>
+      <div class="header-left"><span class="page-title">My Dashboard</span></div>
       <div class="header-right">
-        <div class="notif-btn" id="alert-btn" onclick="toggleAlerts()" title="Alerts">
-          🔔<span class="notif-dot" id="alert-dot"></span>
-        </div>
-        <div class="header-user">
-          <div class="h-avatar"></div>
-          <div><div class="h-name"></div><div class="h-role"></div></div>
-        </div>
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
       </div>
     </header>
     <main class="page-content">
 
       <!-- Welcome Banner -->
-      <div class="welcome-banner" id="welcome-banner">
+      <div class="welcome-banner">
         <div class="welcome-text">
-          <h2 id="welcome-msg">Welcome back, Admin</h2>
-          <p>Smart Shield Cyber Security · MSSP Awareness Platform · NCA | SAMA | CST</p>
+          <h2 id="welcome-msg">Welcome back!</h2>
+          <p>Smart Shield Cyber Security · Cybersecurity Awareness Training</p>
         </div>
         <div class="welcome-shield">🛡️</div>
       </div>
@@ -39,65 +37,43 @@
       <!-- KPI Stats -->
       <div class="grid-4 mb-6" id="stats-grid"></div>
 
-      <!-- Row 2: Compliance + Dept Risk -->
+      <!-- Row 2: Framework Compliance + Upcoming Due -->
       <div class="grid-2 mb-6">
-        <!-- Framework Compliance -->
         <div class="card">
-          <div class="card-header">
-            <h3>Framework Compliance Overview</h3>
-            <a href="compliance.html" class="btn btn-ghost btn-sm">Full Matrix →</a>
-          </div>
-          <div class="card-body">
-            <div class="tabs" id="fw-tabs">
-              <button class="tab-btn active" data-tab="fw-nca">NCA</button>
-              <button class="tab-btn" data-tab="fw-sama">SAMA</button>
-              <button class="tab-btn" data-tab="fw-cst">CST</button>
-            </div>
-            <div style="margin-top:16px">
-              <div id="fw-nca" class="tab-panel active"></div>
-              <div id="fw-sama" class="tab-panel"></div>
-              <div id="fw-cst"  class="tab-panel"></div>
-            </div>
-          </div>
+          <div class="card-header"><h3>📊 My Framework Compliance</h3></div>
+          <div class="card-body" id="fw-compliance"></div>
         </div>
-
-        <!-- Department Risk -->
         <div class="card">
           <div class="card-header">
-            <h3>Department Risk Summary</h3>
-            <a href="users.html" class="btn btn-ghost btn-sm">Manage →</a>
+            <h3>⏰ Upcoming & Overdue</h3>
+            <a href="training.html" class="btn btn-ghost btn-sm">View All →</a>
           </div>
-          <div class="card-body" id="dept-risk-body"></div>
+          <div class="card-body" id="due-list"></div>
         </div>
       </div>
 
-      <!-- Row 3: Recent Activity + Phishing -->
+      <!-- Row 3: My Modules + Recent Activity -->
       <div class="grid-2 mb-6">
         <div class="card">
-          <div class="card-header"><h3>Recent Activity</h3></div>
-          <div class="card-body" id="activity-feed"></div>
+          <div class="card-header">
+            <h3>📚 My Training Modules</h3>
+            <a href="training.html" class="btn btn-ghost btn-sm">Library →</a>
+          </div>
+          <div class="card-body" id="my-modules"></div>
         </div>
         <div class="card">
-          <div class="card-header">
-            <h3>Phishing Exposure (Q1 2026)</h3>
-            <a href="phishing.html" class="btn btn-ghost btn-sm">View All →</a>
-          </div>
-          <div class="card-body" id="phishing-summary"></div>
+          <div class="card-header"><h3>🏆 My Certificates</h3></div>
+          <div class="card-body" id="my-certs"></div>
         </div>
       </div>
 
-      <!-- Row 4: Overdue Training -->
+      <!-- Phishing Awareness -->
       <div class="card">
         <div class="card-header">
-          <h3>⚠️ Overdue Training</h3>
-          <a href="reports.html" class="btn btn-ghost btn-sm">View Report →</a>
+          <h3>🎣 My Phishing Simulation Results</h3>
+          <a href="phishing.html" class="btn btn-ghost btn-sm">Details →</a>
         </div>
-        <div class="card-body">
-          <div class="table-wrapper"><table id="overdue-table">
-            <thead><tr><th>Employee</th><th>Department</th><th>Module</th><th>Due Date</th><th>Status</th></tr></thead>
-            <tbody id="overdue-body"></tbody>
-          </table></div>
-        </div>
+        <div class="card-body" id="phishing-results"></div>
       </div>
 
     </main>
@@ -108,177 +84,130 @@
 <script src="../assets/js/auth.js"></script>
 <script src="../assets/js/utils.js"></script>
 <script>
-const user = initPage('admin');
+const user = initPage('employee');
 if (user) renderPage();
 
 function renderPage() {
-  document.getElementById('welcome-msg').textContent = 'Welcome back, ' + user.name;
-
+  document.getElementById('welcome-msg').textContent = 'Welcome back, ' + user.name + '!';
   renderStats();
-  renderFrameworkTabs();
-  renderDeptRisk();
-  renderActivity();
-  renderPhishingSummary();
-  renderOverdue();
-  initTabs('fw-tabs');
-  renderAlertDot();
+  renderFwCompliance();
+  renderDueList();
+  renderMyModules();
+  renderMyCerts();
+  renderPhishing();
 }
 
 function renderStats() {
-  const employees  = getUsersByRole('employee');
-  const enrolls    = dbGet(DB.ENROLLMENTS);
-  const overdue    = enrolls.filter(e => e.status === 'overdue').length;
-  const overall    = getOrgOverallScore();
-  const campaigns  = dbGet(DB.PHISHING).filter(p => p.status === 'active').length;
+  const enrolls   = getUserEnrollments(user.id);
+  const completed = enrolls.filter(e => e.status === 'completed').length;
+  const inProgress= enrolls.filter(e => e.status === 'in-progress').length;
+  const overdue   = enrolls.filter(e => e.status === 'overdue').length;
+  const total     = enrolls.length || 1;
+  const compPct   = Math.round((completed / total) * 100);
 
   document.getElementById('stats-grid').innerHTML = `
-    <div class="stat-card"><div class="stat-icon blue">👥</div><div class="stat-info"><div class="stat-val">${employees.length}</div><div class="stat-label">Total Employees</div></div></div>
-    <div class="stat-card"><div class="stat-icon green">🛡️</div><div class="stat-info"><div class="stat-val">${overall}%</div><div class="stat-label">Overall Compliance</div><div class="stat-delta ${overall>=60?'up':'down'}">${overall>=60?'▲ On Track':'▼ Needs Attention'}</div></div></div>
-    <div class="stat-card"><div class="stat-icon orange">🎣</div><div class="stat-info"><div class="stat-val">${campaigns}</div><div class="stat-label">Active Phishing Campaigns</div></div></div>
-    <div class="stat-card"><div class="stat-icon red">⏰</div><div class="stat-info"><div class="stat-val">${overdue}</div><div class="stat-label">Overdue Trainings</div><div class="stat-delta ${overdue>0?'down':'up'}">${overdue>0?'▼ Action Required':'▲ All Clear'}</div></div></div>`;
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-info"><div class="stat-val">${completed}</div><div class="stat-label">Completed</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">🔄</div><div class="stat-info"><div class="stat-val">${inProgress}</div><div class="stat-label">In Progress</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">⏰</div><div class="stat-info"><div class="stat-val">${overdue}</div><div class="stat-label">Overdue</div><div class="stat-delta ${overdue>0?'down':'up'}">${overdue>0?'▼ Action Required':'▲ All Clear'}</div></div></div>
+    <div class="stat-card"><div class="stat-icon purple">🛡️</div><div class="stat-info"><div class="stat-val">${compPct}%</div><div class="stat-label">Overall Progress</div>${progressBar(compPct)}</div></div>`;
 }
 
-function renderFrameworkTabs() {
-  ['NCA-ECC','SAMA','CST'].forEach((code, i) => {
-    const panelId = ['fw-nca','fw-sama','fw-cst'][i];
-    const scores  = getFrameworkDomainScores(code);
-    const overall = getOrgComplianceScore(code);
-    const panel   = document.getElementById(panelId);
-    if (!panel) return;
-    let html = `<div class="flex items-center justify-between mb-4"><span class="font-semibold text-sm">Overall Score</span>${complianceBadge(overall)}</div>`;
-    scores.forEach(s => {
-      const color = s.pct >= 80 ? '#22c55e' : s.pct >= 40 ? '#f59e0b' : '#ef4444';
-      html += `<div class="bar-chart-row"><div class="bar-label" title="${s.domain}">${s.domain}</div><div class="bar-track"><div class="bar-fill" style="width:${s.pct}%;background:${color}"></div></div><div class="bar-pct">${s.pct}%</div></div>`;
-    });
-    panel.innerHTML = html;
-  });
-}
-
-function renderDeptRisk() {
-  const depts = dbGet(DB.DEPARTMENTS);
-  let html = '<div class="table-wrapper"><table><thead><tr><th>Department</th><th>Employees</th><th>Compliance</th><th>Risk Level</th></tr></thead><tbody>';
-  depts.forEach(d => {
-    const users = getUsersByDept(d.name);
-    const enrolls = dbGet(DB.ENROLLMENTS).filter(e => users.some(u=>u.id===e.userId));
-    const comp = enrolls.length ? Math.round(enrolls.filter(e=>e.status==='completed').length/enrolls.length*100) : 0;
-    const risk = comp>=80?'low':comp>=50?'medium':comp>=30?'high':'critical';
-    html += `<tr><td><strong>${d.name}</strong></td><td>${users.length}</td><td>${progressBar(comp)}<span class="text-xs text-muted">${comp}%</span></td><td>${riskBadgeFromLevel(risk)}</td></tr>`;
-  });
-  html += '</tbody></table></div>';
-  document.getElementById('dept-risk-body').innerHTML = html;
-}
-
-function renderActivity() {
-  const events  = [...dbGet(DB.ENROLLMENTS)].sort((a,b)=>new Date(b.enrolledAt)-new Date(a.enrolledAt)).slice(0,8);
-  const colors  = { completed:'#22c55e', 'in-progress':'#0ea5e9', overdue:'#ef4444', 'not-started':'#9ca3af' };
-  let html = '<div class="activity-list">';
-  events.forEach(e => {
-    const u   = dbGetOne(DB.USERS, e.userId);
-    const mod = dbGetOne(DB.MODULES, e.moduleId);
-    if (!u || !mod) return;
-    html += `<div class="activity-item">
-      <div class="activity-dot" style="background:${colors[e.status]||'#9ca3af'}"></div>
-      <div class="activity-body">
-        <strong>${u.name}</strong> ${e.status==='completed'?'completed':'enrolled in'} <em>${mod.title}</em>
-        <div class="activity-time">${daysAgo(e.status==='completed'?e.completedAt:e.enrolledAt)}</div>
-      </div>
-      ${statusBadge(e.status)}
+function renderFwCompliance() {
+  const enrolls   = getUserEnrollments(user.id);
+  const completed = enrolls.filter(e => e.status === 'completed').map(e => e.moduleId);
+  const fws = [
+    { code:'NCA-ECC', label:'NCA ECC', icon:'🔵' },
+    { code:'SAMA',    label:'SAMA CSF', icon:'🟣' },
+    { code:'CST',     label:'CST',      icon:'🟠' },
+  ];
+  document.getElementById('fw-compliance').innerHTML = fws.map(f => {
+    const mods = dbGet(DB.MODULES).filter(m => m.frameworkControls && m.frameworkControls.some(fc => fc.framework === f.code) && m.status === 'published');
+    const done = mods.filter(m => completed.includes(m.id)).length;
+    const pct  = mods.length ? Math.round(done / mods.length * 100) : 0;
+    const color = pct >= 80 ? '#22c55e' : pct >= 40 ? '#f59e0b' : '#ef4444';
+    return `<div class="bar-chart-row">
+      <div class="bar-label">${f.icon} ${f.label}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
+      <div class="bar-pct">${pct}%</div>
     </div>`;
-  });
-  html += '</div>';
-  document.getElementById('activity-feed').innerHTML = html;
-}
-
-function renderPhishingSummary() {
-  const campaigns = dbGet(DB.PHISHING);
-  let html = '';
-  campaigns.forEach(c => {
-    const stats = getCampaignStats(c.id);
-    const clickRate = stats.sent > 0 ? Math.round(stats.clicked/stats.sent*100) : 0;
-    html += `<div class="mb-4 p-4" style="background:var(--gray-50);border-radius:var(--radius)">
-      <div class="flex items-center justify-between mb-2">
-        <strong class="text-sm">${c.name}</strong>
-        ${statusBadge(c.status)}
-      </div>
-      <div class="campaign-stats">
-        <div class="camp-stat"><div class="cs-val">${stats.sent}</div><div class="cs-label">Sent</div></div>
-        <div class="camp-stat"><div class="cs-val">${stats.opened}</div><div class="cs-label">Opened</div></div>
-        <div class="camp-stat danger"><div class="cs-val">${stats.clicked}</div><div class="cs-label">Clicked (${clickRate}%)</div></div>
-        <div class="camp-stat success"><div class="cs-val">${stats.reported}</div><div class="cs-label">Reported</div></div>
-      </div>
-    </div>`;
-  });
-  document.getElementById('phishing-summary').innerHTML = html || '<div class="empty-state"><div class="empty-state-icon">🎣</div><h3>No Campaigns Yet</h3></div>';
-}
-
-function renderOverdue() {
-  const overdues = dbGet(DB.ENROLLMENTS).filter(e => e.status === 'overdue');
-  const tbody = document.getElementById('overdue-body');
-  if (!overdues.length) { tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state" style="padding:24px"><div class="empty-state-icon">✅</div><h3>No overdue trainings!</h3></div></td></tr>'; return; }
-  tbody.innerHTML = overdues.map(e => {
-    const u   = dbGetOne(DB.USERS, e.userId);
-    const mod = dbGetOne(DB.MODULES, e.moduleId);
-    if (!u || !mod) return '';
-    const days = Math.abs(daysUntil(e.dueDate));
-    return `<tr>
-      <td>${avatarHtml(u,'sm')} <strong style="margin-left:8px">${u.name}</strong></td>
-      <td>${u.department}</td>
-      <td>${mod.title}</td>
-      <td><span class="text-danger font-semibold">${days} day(s) ago</span></td>
-      <td>${statusBadge('overdue')}</td>
-    </tr>`;
   }).join('');
 }
 
-function renderAlertDot() {
-  const alerts = dbGet(DB.ALERTS).filter(a => !a.read);
-  const dot = document.getElementById('alert-dot');
-  if (dot) dot.style.display = alerts.length > 0 ? 'block' : 'none';
-}
-
-function toggleAlerts() {
-  const alerts = dbGet(DB.ALERTS).filter(a => !a.read);
-  if (!alerts.length) { showToast('No new alerts', 'info'); return; }
-  let panel = document.getElementById('alert-panel');
-  if (!panel) {
-    panel = document.createElement('div');
-    panel.id = 'alert-panel';
-    panel.style.cssText = 'position:fixed;top:60px;right:20px;z-index:9999;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.18);min-width:320px;max-width:400px;border:1px solid var(--gray-200)';
-    document.body.appendChild(panel);
-  }
-  const iconMap = { warning:'⚠️', info:'ℹ️', success:'✅', error:'❌' };
-  panel.innerHTML = `
-    <div style="padding:16px 20px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
-      <strong style="font-size:0.9375rem">🔔 Alerts (${alerts.length})</strong>
-      <button onclick="document.getElementById('alert-panel').remove()" style="background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--gray-400)">✕</button>
-    </div>
-    <div style="padding:12px 0;max-height:300px;overflow-y:auto">
-      ${alerts.map(a => `
-        <div style="padding:12px 20px;border-bottom:1px solid var(--gray-50);display:flex;gap:10px;align-items:flex-start">
-          <span>${iconMap[a.type] || 'ℹ️'}</span>
-          <span style="font-size:0.875rem;color:var(--gray-700)">${escHtml(a.message)}</span>
-        </div>`).join('')}
-    </div>
-    <div style="padding:12px 20px">
-      <button class="btn btn-ghost btn-sm" style="width:100%" onclick="markAllAlertsRead()">✓ Mark All Read</button>
+function renderDueList() {
+  const enrolls = getUserEnrollments(user.id)
+    .filter(e => e.status !== 'completed' && e.dueDate)
+    .sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate))
+    .slice(0, 6);
+  const el = document.getElementById('due-list');
+  if (!enrolls.length) { el.innerHTML = '<div class="empty-state" style="padding:16px"><div class="empty-state-icon">✅</div><h3>All caught up!</h3></div>'; return; }
+  el.innerHTML = enrolls.map(e => {
+    const mod = dbGetOne(DB.MODULES, e.moduleId);
+    if (!mod) return '';
+    const days = daysUntil(e.dueDate);
+    const isOD = e.status === 'overdue';
+    return `<div class="flex items-center gap-3 mb-3 p-3" style="background:${isOD?'var(--danger-light)':'var(--gray-50)'};border-radius:var(--radius);border-left:3px solid ${isOD?'var(--danger)':'var(--warning)'}">
+      <span style="font-size:1.25rem">${mod.icon||'📚'}</span>
+      <div class="flex-1">
+        <div class="text-sm font-semibold">${escHtml(mod.title)}</div>
+        <div class="text-xs ${isOD?'text-danger':'text-muted'}">${isOD ? Math.abs(days)+' day(s) overdue' : days+' day(s) remaining'}</div>
+      </div>
+      ${statusBadge(e.status)}
+      <a href="learn.html?module=${mod.id}" class="btn btn-primary btn-sm">${e.status==='in-progress'?'Continue':'Start'}</a>
     </div>`;
-  setTimeout(() => {
-    document.addEventListener('click', function closePanel(e) {
-      if (!panel.contains(e.target) && e.target.id !== 'alert-btn') {
-        panel.remove();
-        document.removeEventListener('click', closePanel);
-      }
-    });
-  }, 100);
+  }).join('');
 }
 
-function markAllAlertsRead() {
-  const alerts = dbGet(DB.ALERTS).filter(a => !a.read);
-  alerts.forEach(a => { a.read = true; dbSave(DB.ALERTS, a); });
-  renderAlertDot();
-  const panel = document.getElementById('alert-panel');
-  if (panel) panel.remove();
-  showToast('All alerts marked as read', 'success');
+function renderMyModules() {
+  const enrolls = getUserEnrollments(user.id).sort((a,b) => new Date(b.enrolledAt) - new Date(a.enrolledAt)).slice(0, 5);
+  const el = document.getElementById('my-modules');
+  if (!enrolls.length) { el.innerHTML = '<div class="empty-state" style="padding:16px"><div class="empty-state-icon">📚</div><h3>No modules assigned yet</h3><a href="training.html" class="btn btn-primary btn-sm mt-3">Browse Training</a></div>'; return; }
+  el.innerHTML = enrolls.map(e => {
+    const mod = dbGetOne(DB.MODULES, e.moduleId);
+    if (!mod) return '';
+    const pct = e.progress || 0;
+    return `<div class="flex items-center gap-3 mb-3">
+      <span style="font-size:1.5rem">${mod.icon||'📚'}</span>
+      <div class="flex-1">
+        <div class="text-sm font-semibold">${escHtml(mod.title)}</div>
+        ${progressBar(pct)}
+        <div class="text-xs text-muted mt-1">${pct}% · ${statusBadge(e.status)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderMyCerts() {
+  const certs = getUserCertificates(user.id);
+  const el = document.getElementById('my-certs');
+  if (!certs.length) { el.innerHTML = '<div class="empty-state" style="padding:16px"><div class="empty-state-icon">🏆</div><h3>No certificates yet</h3><p class="text-xs text-muted">Pass quizzes to earn certificates</p></div>'; return; }
+  el.innerHTML = certs.slice(0,4).map(en => {
+    const mod = en.module;
+    if (!mod) return '';
+    return `<div class="flex items-center gap-3 mb-3 p-3" style="background:var(--success-light);border-radius:var(--radius)">
+      <span style="font-size:1.25rem">${mod.icon||'🏆'}</span>
+      <div class="flex-1">
+        <div class="text-sm font-semibold">${escHtml(mod.title)}</div>
+        <div class="text-xs text-muted">${formatDate(en.certificate.issuedAt)} · Score: ${en.certificate.score}%</div>
+      </div>
+      <a href="profile.html" class="btn btn-ghost btn-sm">View</a>
+    </div>`;
+  }).join('');
+}
+
+function renderPhishing() {
+  const events = getUserPhishingHistory(user.id);
+  const el = document.getElementById('phishing-results');
+  if (!events.length) { el.innerHTML = '<div class="empty-state" style="padding:16px"><div class="empty-state-icon">🎣</div><h3>No phishing simulations yet</h3></div>'; return; }
+  const sent     = events.filter(e => e.eventType === 'sent').length;
+  const clicked  = events.filter(e => e.eventType === 'clicked').length;
+  const reported = events.filter(e => e.eventType === 'reported').length;
+  el.innerHTML = `
+    <div class="flex gap-4 flex-wrap mb-4">
+      <div class="camp-stat"><div class="cs-val">${sent}</div><div class="cs-label">Simulations Received</div></div>
+      <div class="camp-stat danger"><div class="cs-val">${clicked}</div><div class="cs-label">Links Clicked</div></div>
+      <div class="camp-stat success"><div class="cs-val">${reported}</div><div class="cs-label">Correctly Reported</div></div>
+    </div>
+    ${clicked > 0 ? '<div class="alert alert-warning"><span>⚠️</span><span>You clicked on simulated phishing links. Review the <a href="training.html">Phishing Awareness module</a> to improve your detection skills.</span></div>' : '<div class="alert alert-success"><span>✅</span><span>Great job! You haven\'t fallen for any phishing simulations.</span></div>'}`;
 }
 </script>
 </body>
