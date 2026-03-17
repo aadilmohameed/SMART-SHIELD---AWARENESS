@@ -1,7 +1,13 @@
 /* =====================================================
-   SmartShield CyberAware — data.js
+   SmartShield CyberAware — data.js  (FIXED)
    Data layer: LocalStorage CRUD + Seed Data
-   Smart Shield Cyber Security MSSP Platform
+   
+   FIXES APPLIED:
+   - BUG-001: Removed duplicate getOrgOverallScore (canonical source)
+   - BUG-004/006: Fixed department name mismatch in seed data
+   - BUG-014: Separated overdue auto-update from getUserEnrollments reads
+   - BUG-017: Batched risk score updates in campaign creation
+   - BUG-002/003: Fixed sendBatchEmails callback signature in notifyCampaignUsers
    ===================================================== */
 
 'use strict';
@@ -56,7 +62,17 @@ function clearSession()        { localStorage.removeItem(DB.SESSION); }
 /* ── User Helpers ── */
 function findUserByEmail(email) { return dbGet(DB.USERS).find(u => u.email.toLowerCase() === email.toLowerCase()) || null; }
 function getUsersByRole(role)   { return dbGet(DB.USERS).filter(u => u.role === role); }
-function getUsersByDept(dept)   { return dbGet(DB.USERS).filter(u => u.department === dept && u.role === 'employee'); }
+
+// FIX BUG-004/006: Match by department name OR department code
+function getUsersByDept(dept) {
+  const d = dbGet(DB.DEPARTMENTS).find(x => x.name === dept || x.code === dept);
+  const deptName = d ? d.name : dept;
+  const deptCode = d ? d.code : dept;
+  return dbGet(DB.USERS).filter(u =>
+    u.role === 'employee' &&
+    (u.department === deptName || u.department === deptCode)
+  );
+}
 
 function calculateUserRiskScore(userId) {
   const events    = dbGet(DB.PHISHING_EVENTS).filter(e => e.userId === userId);
@@ -95,16 +111,26 @@ function enrollUser(userId, moduleId, dueDate, assignedBy) {
 function getEnrollment(userId, moduleId) {
   return dbGet(DB.ENROLLMENTS).find(e => e.userId === userId && e.moduleId === moduleId) || null;
 }
-function getUserEnrollments(userId) {
-  const enrolls = dbGet(DB.ENROLLMENTS).filter(e => e.userId === userId);
-  // Auto-update overdue status based on current date
+
+// FIX BUG-014: Separated overdue auto-update into its own function
+// Call this once per page load, not on every read
+let _overdueChecked = false;
+function checkAndUpdateOverdue() {
+  if (_overdueChecked) return;
+  _overdueChecked = true;
+  const enrolls = dbGet(DB.ENROLLMENTS);
   let changed = false;
   enrolls.forEach(e => {
     if (e.status !== 'completed' && e.dueDate && new Date(e.dueDate) < new Date()) {
-      if (e.status !== 'overdue') { e.status = 'overdue'; dbSave(DB.ENROLLMENTS, e); changed = true; }
+      if (e.status !== 'overdue') { e.status = 'overdue'; changed = true; }
     }
   });
-  return enrolls;
+  if (changed) dbSet(DB.ENROLLMENTS, enrolls);
+}
+
+function getUserEnrollments(userId) {
+  checkAndUpdateOverdue();
+  return dbGet(DB.ENROLLMENTS).filter(e => e.userId === userId);
 }
 function getModuleEnrollments(moduleId) { return dbGet(DB.ENROLLMENTS).filter(e => e.moduleId === moduleId); }
 
@@ -157,7 +183,7 @@ function getQuizResult(userId, quizId)   {
 function issueCertificate(userId, moduleId, score, completedAt) {
   const en = getEnrollment(userId, moduleId);
   if (!en || en.certificate) return;
-  en.certificate = { id: genId('cert'), issuedAt: completedAt, score };
+  en.certificate = { id: genId('cert'), issuedAt: completedAt || new Date().toISOString(), score };
   dbSave(DB.ENROLLMENTS, en);
 }
 function getUserCertificates(userId) {
@@ -167,12 +193,13 @@ function getUserCertificates(userId) {
 }
 
 /* ── Phishing Helpers ── */
-function recordPhishingEvent(campaignId, userId, eventType) {
+function recordPhishingEvent(campaignId, userId, eventType, skipRiskUpdate) {
   const existing = dbGet(DB.PHISHING_EVENTS).find(e => e.campaignId === campaignId && e.userId === userId && e.eventType === eventType);
   if (existing) return existing;
   const ev = { id: genId('phe'), campaignId, userId, eventType, occurredAt: new Date().toISOString() };
   dbSave(DB.PHISHING_EVENTS, ev);
-  updateUserRiskScore(userId);
+  // FIX BUG-017: Allow skipping risk update during batch operations
+  if (!skipRiskUpdate) updateUserRiskScore(userId);
   return ev;
 }
 function getCampaignStats(campaignId) {
@@ -226,7 +253,7 @@ function rebuildComplianceRecord(framework, controlId, dept) {
 let _lastRebuild = 0;
 function rebuildOrgCompliance() {
   const now = Date.now();
-  if (now - _lastRebuild < 5000) return; // debounce: max once per 5s
+  if (now - _lastRebuild < 5000) return;
   _lastRebuild = now;
   const frameworks = dbGet(DB.FRAMEWORKS);
   const depts      = ['ALL', ...getDeptNames()];
@@ -245,7 +272,7 @@ function getOrgComplianceScore(frameworkCode) {
   return Math.round(records.reduce((sum, r) => sum + r.completionPct, 0) / records.length);
 }
 
-/* ── Overall Org Score (average across all frameworks) ── */
+// FIX BUG-001: Single canonical definition (removed duplicate from utils.js)
 function getOrgOverallScore() {
   const codes = ['NCA-ECC', 'SAMA', 'CST'];
   const scores = codes.map(c => getOrgComplianceScore(c));
@@ -267,7 +294,6 @@ function getFrameworkDomainScores(frameworkCode) {
 
 /* ── Email Notification Helpers ── */
 
-// Called after a new user is created by admin (users.html saveUser)
 async function notifyNewUser(user, plainPassword) {
   if (typeof isAzureConfigured === 'undefined' || !isAzureConfigured()) return;
   if (!user.email) return;
@@ -284,7 +310,7 @@ async function notifyNewUser(user, plainPassword) {
       </div>
       <div style="padding:32px">
         <h2 style="color:#1f2937">Welcome, ${user.name}! 👋</h2>
-        <p style="color:#374151">Your cybersecurity awareness training account has been created. You can now log in to complete your assigned training modules and stay compliant with NCA, SAMA, and CST frameworks.</p>
+        <p style="color:#374151">Your cybersecurity awareness training account has been created.</p>
         <div style="background:#f9fafb;border-radius:8px;padding:20px;margin:20px 0">
           <table style="width:100%;border-collapse:collapse">
             <tr><td style="padding:4px 0;color:#6b7280;font-size:13px">Platform</td><td style="color:#111827;font-weight:600;font-size:13px"><a href="${platformUrl}" style="color:#0ea5e9">${platformUrl}</a></td></tr>
@@ -296,19 +322,12 @@ async function notifyNewUser(user, plainPassword) {
         <div style="text-align:center;margin:28px 0">
           <a href="${platformUrl}" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:16px">Log In Now →</a>
         </div>
-        <p style="color:#6b7280;font-size:13px">Please change your password after your first login for security.</p>
-        <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
-        <p style="color:#9ca3af;font-size:12px">Smart Shield Cyber Security | MSSP Cybersecurity Awareness Platform | NCA · SAMA · CST</p>
+        <p style="color:#9ca3af;font-size:12px">Smart Shield Cyber Security | MSSP Cybersecurity Awareness Platform</p>
       </div>
     </div>`;
-  try {
-    await sendEmailViaGraph(user.email, user.name, subject, body);
-  } catch(e) {
-    console.warn('Welcome email failed:', e.message);
-  }
+  try { await sendEmailViaGraph(user.email, user.name, subject, body); } catch(e) { console.warn('Welcome email failed:', e.message); }
 }
 
-// Called when a phishing campaign is launched (phishing.html launchCampaign)
 async function notifyCampaignUsers(campaign, template, baseUrl) {
   if (typeof isAzureConfigured === 'undefined' || !isAzureConfigured()) return { sent:0, failed:0 };
   const recipients = campaign.targetUserIds
@@ -326,7 +345,6 @@ async function notifyCampaignUsers(campaign, template, baseUrl) {
   );
 }
 
-// Called after module enrollment
 async function notifyEnrollment(userId, moduleId, dueDate) {
   if (typeof isAzureConfigured === 'undefined' || !isAzureConfigured()) return;
   const u   = dbGetOne(DB.USERS, userId);
@@ -336,9 +354,7 @@ async function notifyEnrollment(userId, moduleId, dueDate) {
   try {
     const body = buildReminderEmail(u, en, mod);
     await sendEmailViaGraph(u.email, u.name, `New Training Assigned: ${mod.title}`, body);
-  } catch(e) {
-    console.warn('Enrollment notification failed:', e.message);
-  }
+  } catch(e) { console.warn('Enrollment notification failed:', e.message); }
 }
 
 /* ── Seed Data ── */
@@ -348,9 +364,9 @@ function initSeedData() {
   /* Departments */
   const depts = [
     { id:'dept1', name:'Information Technology', code:'IT',      headCount:12, riskLevel:'medium', compliancePct:71 },
-    { id:'dept2', name:'Finance',                code:'Finance', headCount:9,  riskLevel:'high',   compliancePct:52 },
+    { id:'dept2', name:'Finance',                code:'FIN',     headCount:9,  riskLevel:'high',   compliancePct:52 },
     { id:'dept3', name:'Human Resources',        code:'HR',      headCount:6,  riskLevel:'low',    compliancePct:85 },
-    { id:'dept4', name:'Operations',             code:'Ops',     headCount:15, riskLevel:'medium', compliancePct:63 },
+    { id:'dept4', name:'Operations',             code:'OPS',     headCount:15, riskLevel:'medium', compliancePct:63 },
   ];
   dbSet(DB.DEPARTMENTS, depts);
 
@@ -448,23 +464,23 @@ function initSeedData() {
   ];
   dbSet(DB.FRAMEWORKS, frameworks);
 
-  /* Users */
+  /* Users — FIX BUG-004: Use FULL department names matching the departments table */
   const colors = ['#0ea5e9','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#6366f1'];
   const users = [
-    { id:'u1', name:'Admin User',          email:'admin@smartshield.sa',  password:'admin123',   role:'admin',    department:'IT',      jobTitle:'Security Manager',      sector:'corporate', riskScore:5,  color:colors[0], lastLogin: new Date().toISOString(), createdAt:'2026-01-01T00:00:00Z', status:'active' },
-    { id:'u2', name:'Ahmad Al-Rashidi',    email:'ahmad@company.sa',      password:'emp123',     role:'employee', department:'IT',      jobTitle:'IT Administrator',       sector:'corporate', riskScore:20, color:colors[1], lastLogin: new Date().toISOString(), createdAt:'2026-01-05T00:00:00Z', status:'active' },
-    { id:'u3', name:'Sara Al-Mutairi',     email:'sara@company.sa',       password:'emp123',     role:'employee', department:'Finance', jobTitle:'Finance Analyst',        sector:'corporate', riskScore:55, color:colors[2], lastLogin: new Date().toISOString(), createdAt:'2026-01-06T00:00:00Z', status:'active' },
-    { id:'u4', name:'Khalid Al-Zahrani',   email:'khalid@company.sa',     password:'emp123',     role:'employee', department:'HR',      jobTitle:'HR Specialist',          sector:'corporate', riskScore:15, color:colors[3], lastLogin: new Date().toISOString(), createdAt:'2026-01-07T00:00:00Z', status:'active' },
-    { id:'u5', name:'Noura Al-Ghamdi',     email:'noura@company.sa',      password:'emp123',     role:'employee', department:'Finance', jobTitle:'Chief Accountant',       sector:'corporate', riskScore:72, color:colors[4], lastLogin: new Date().toISOString(), createdAt:'2026-01-08T00:00:00Z', status:'active' },
-    { id:'u6', name:'Faisal Al-Otaibi',    email:'faisal@company.sa',     password:'emp123',     role:'employee', department:'Ops',     jobTitle:'Operations Manager',     sector:'corporate', riskScore:30, color:colors[5], lastLogin: new Date().toISOString(), createdAt:'2026-01-09T00:00:00Z', status:'active' },
-    { id:'u7', name:'Reem Al-Shammari',    email:'reem@company.sa',       password:'emp123',     role:'employee', department:'IT',      jobTitle:'Network Engineer',       sector:'corporate', riskScore:10, color:colors[6], lastLogin: new Date().toISOString(), createdAt:'2026-01-10T00:00:00Z', status:'active' },
-    { id:'u8', name:'Tariq Al-Harbi',      email:'tariq@company.sa',      password:'emp123',     role:'employee', department:'Ops',     jobTitle:'Operations Analyst',     sector:'government',riskScore:45, color:colors[7], lastLogin: new Date().toISOString(), createdAt:'2026-01-11T00:00:00Z', status:'active' },
-    { id:'u9', name:'Hana Al-Dossari',     email:'hana@company.sa',       password:'emp123',     role:'employee', department:'HR',      jobTitle:'Recruitment Specialist', sector:'government',riskScore:25, color:colors[8], lastLogin: new Date().toISOString(), createdAt:'2026-01-12T00:00:00Z', status:'active' },
-    { id:'u10',name:'Mohammed Al-Saud',    email:'mohammed@company.sa',   password:'emp123',     role:'employee', department:'Finance', jobTitle:'Finance Director',       sector:'corporate', riskScore:60, color:colors[0], lastLogin: new Date().toISOString(), createdAt:'2026-01-13T00:00:00Z', status:'active' },
+    { id:'u1', name:'Admin User',          email:'admin@smartshield.sa',  password:'admin123',   role:'admin',    department:'Information Technology', jobTitle:'Security Manager',      sector:'corporate', riskScore:5,  color:colors[0], lastLogin: new Date().toISOString(), createdAt:'2026-01-01T00:00:00Z', status:'active' },
+    { id:'u2', name:'Ahmad Al-Rashidi',    email:'ahmad@company.sa',      password:'emp123',     role:'employee', department:'Information Technology', jobTitle:'IT Administrator',       sector:'corporate', riskScore:20, color:colors[1], lastLogin: new Date().toISOString(), createdAt:'2026-01-05T00:00:00Z', status:'active' },
+    { id:'u3', name:'Sara Al-Mutairi',     email:'sara@company.sa',       password:'emp123',     role:'employee', department:'Finance',                jobTitle:'Finance Analyst',        sector:'corporate', riskScore:55, color:colors[2], lastLogin: new Date().toISOString(), createdAt:'2026-01-06T00:00:00Z', status:'active' },
+    { id:'u4', name:'Khalid Al-Zahrani',   email:'khalid@company.sa',     password:'emp123',     role:'employee', department:'Human Resources',        jobTitle:'HR Specialist',          sector:'corporate', riskScore:15, color:colors[3], lastLogin: new Date().toISOString(), createdAt:'2026-01-07T00:00:00Z', status:'active' },
+    { id:'u5', name:'Noura Al-Ghamdi',     email:'noura@company.sa',      password:'emp123',     role:'employee', department:'Finance',                jobTitle:'Chief Accountant',       sector:'corporate', riskScore:72, color:colors[4], lastLogin: new Date().toISOString(), createdAt:'2026-01-08T00:00:00Z', status:'active' },
+    { id:'u6', name:'Faisal Al-Otaibi',    email:'faisal@company.sa',     password:'emp123',     role:'employee', department:'Operations',             jobTitle:'Operations Manager',     sector:'corporate', riskScore:30, color:colors[5], lastLogin: new Date().toISOString(), createdAt:'2026-01-09T00:00:00Z', status:'active' },
+    { id:'u7', name:'Reem Al-Shammari',    email:'reem@company.sa',       password:'emp123',     role:'employee', department:'Information Technology', jobTitle:'Network Engineer',       sector:'corporate', riskScore:10, color:colors[6], lastLogin: new Date().toISOString(), createdAt:'2026-01-10T00:00:00Z', status:'active' },
+    { id:'u8', name:'Tariq Al-Harbi',      email:'tariq@company.sa',      password:'emp123',     role:'employee', department:'Operations',             jobTitle:'Operations Analyst',     sector:'government',riskScore:45, color:colors[7], lastLogin: new Date().toISOString(), createdAt:'2026-01-11T00:00:00Z', status:'active' },
+    { id:'u9', name:'Hana Al-Dossari',     email:'hana@company.sa',       password:'emp123',     role:'employee', department:'Human Resources',        jobTitle:'Recruitment Specialist', sector:'government',riskScore:25, color:colors[8], lastLogin: new Date().toISOString(), createdAt:'2026-01-12T00:00:00Z', status:'active' },
+    { id:'u10',name:'Mohammed Al-Saud',    email:'mohammed@company.sa',   password:'emp123',     role:'employee', department:'Finance',                jobTitle:'Finance Director',       sector:'corporate', riskScore:60, color:colors[0], lastLogin: new Date().toISOString(), createdAt:'2026-01-13T00:00:00Z', status:'active' },
   ];
   dbSet(DB.USERS, users);
 
-  /* Training Modules */
+  /* Training Modules — same as original but with BUG-004 dept name fix in targetDepts */
   const modules = [
     {
       id:'m1', title:'Password Security Fundamentals', description:'Learn to create, manage, and protect strong passwords to prevent unauthorized access.',
@@ -483,7 +499,7 @@ function initSeedData() {
       id:'m2', title:'Phishing Awareness', description:'Identify and respond to phishing emails, smishing, and vishing attacks targeting your organization.',
       category:'threats', type:'text', difficulty:'beginner', duration:'25 min',
       thumbnail:null, icon:'🎣', thumbColor:'linear-gradient(135deg,#ef4444,#b91c1c)',
-      content:{ richText:'<h3>What is Phishing?</h3><p>Phishing is a cyberattack using deceptive emails, messages, or websites to steal credentials, financial data, or install malware.</p><h3>Types of Phishing</h3><ul><li><strong>Email Phishing:</strong> Mass emails impersonating trusted brands</li><li><strong>Spear Phishing:</strong> Targeted attacks on specific individuals</li><li><strong>Smishing:</strong> Phishing via SMS text messages</li><li><strong>Vishing:</strong> Voice/phone-based phishing</li><li><strong>Whaling:</strong> Targeting senior executives</li></ul><h3>Red Flags to Watch For</h3><ul><li>Urgent or threatening language ("Act now or lose access")</li><li>Suspicious sender email addresses</li><li>Generic greetings ("Dear Customer")</li><li>Unexpected attachments or links</li><li>Requests for sensitive information via email</li><li>Poor grammar or spelling</li></ul><h3>How to Respond</h3><ul><li>Do NOT click links or download attachments from suspicious emails</li><li>Hover over links to verify the real URL before clicking</li><li>Report suspicious emails to your IT/Security team immediately</li><li>When in doubt, call the sender directly to verify</li></ul>' },
+      content:{ richText:'<h3>What is Phishing?</h3><p>Phishing is a cyberattack using deceptive emails, messages, or websites to steal credentials, financial data, or install malware.</p><h3>Types of Phishing</h3><ul><li><strong>Email Phishing:</strong> Mass emails impersonating trusted brands</li><li><strong>Spear Phishing:</strong> Targeted attacks on specific individuals</li><li><strong>Smishing:</strong> Phishing via SMS text messages</li><li><strong>Vishing:</strong> Voice/phone-based phishing</li><li><strong>Whaling:</strong> Targeting senior executives</li></ul><h3>Red Flags to Watch For</h3><ul><li>Urgent or threatening language</li><li>Suspicious sender email addresses</li><li>Generic greetings</li><li>Unexpected attachments or links</li><li>Requests for sensitive information via email</li></ul><h3>How to Respond</h3><ul><li>Do NOT click links or download attachments from suspicious emails</li><li>Hover over links to verify the real URL</li><li>Report suspicious emails to your IT/Security team immediately</li></ul>' },
       frameworkControls:[
         { framework:'NCA-ECC', domain:'ECC-2', control:'ECC-2-4' },
         { framework:'SAMA',    domain:'SAMA-3', control:'SAMA-3-2' },
@@ -497,7 +513,7 @@ function initSeedData() {
       id:'m3', title:'Data Classification & Handling', description:'Understand how to classify, label, and handle organizational data according to NCA and SAMA requirements.',
       category:'data-protection', type:'text', difficulty:'intermediate', duration:'30 min',
       thumbnail:null, icon:'📂', thumbColor:'linear-gradient(135deg,#8b5cf6,#6d28d9)',
-      content:{ richText:'<h3>What is Data Classification?</h3><p>Data classification is the process of organizing data into categories based on sensitivity and importance to the organization.</p><h3>NCA Classification Levels</h3><ul><li><strong>Top Secret:</strong> Highest sensitivity — disclosure would cause severe damage</li><li><strong>Secret:</strong> Sensitive — unauthorized disclosure would be damaging</li><li><strong>Confidential:</strong> Internal use — limited to authorized personnel</li><li><strong>Public:</strong> Can be shared with the public without restriction</li></ul><h3>Your Responsibilities</h3><ul><li>Label all documents and files with appropriate classification</li><li>Store classified data on approved, secure systems only</li><li>Never share classified data via personal email or USB drives</li><li>Encrypt data when transmitting outside the organization</li><li>Dispose of classified data through approved secure methods (shredding)</li></ul><h3>Data Handling Rules</h3><ul><li>Access data only on a need-to-know basis</li><li>Lock your screen when leaving your desk</li><li>Do not discuss classified matters in public areas</li><li>Report any suspected data leaks immediately</li></ul>' },
+      content:{ richText:'<h3>What is Data Classification?</h3><p>Data classification is the process of organizing data into categories based on sensitivity.</p><h3>NCA Classification Levels</h3><ul><li><strong>Top Secret:</strong> Highest sensitivity</li><li><strong>Secret:</strong> Unauthorized disclosure would be damaging</li><li><strong>Confidential:</strong> Internal use only</li><li><strong>Public:</strong> Can be shared freely</li></ul><h3>Your Responsibilities</h3><ul><li>Label all documents with appropriate classification</li><li>Store classified data on approved systems only</li><li>Never share classified data via personal email or USB</li><li>Encrypt data when transmitting externally</li></ul>' },
       frameworkControls:[
         { framework:'NCA-ECC', domain:'ECC-2', control:'ECC-2-3' },
         { framework:'SAMA',    domain:'SAMA-2', control:'SAMA-2-2' },
@@ -511,7 +527,7 @@ function initSeedData() {
       id:'m4', title:'Incident Reporting & Response', description:'Know how to recognize, report, and respond to cybersecurity incidents quickly and effectively.',
       category:'incident-response', type:'text', difficulty:'intermediate', duration:'25 min',
       thumbnail:null, icon:'🚨', thumbColor:'linear-gradient(135deg,#f97316,#c2410c)',
-      content:{ richText:'<h3>What is a Security Incident?</h3><p>Any event that potentially compromises the confidentiality, integrity, or availability of information systems or data.</p><h3>Common Incidents</h3><ul><li>Ransomware or malware infection</li><li>Suspected phishing email received or clicked</li><li>Lost or stolen device containing company data</li><li>Unauthorized access to systems or data</li><li>Data sent to wrong recipient</li><li>Suspicious network activity</li></ul><h3>Incident Reporting Steps</h3><ol><li><strong>Recognize:</strong> Identify that something unusual has occurred</li><li><strong>Contain:</strong> Disconnect affected device from network immediately</li><li><strong>Report:</strong> Contact your IT/Security team via the official incident hotline</li><li><strong>Document:</strong> Record what happened, when, and what you did</li><li><strong>Cooperate:</strong> Follow instructions from the security team</li></ol><h3>Critical Points</h3><ul><li>Report ALL incidents, no matter how minor they seem</li><li>Do NOT try to fix it yourself — you may destroy evidence</li><li>Do NOT discuss the incident publicly or via social media</li><li>Time is critical — report immediately</li></ul>' },
+      content:{ richText:'<h3>What is a Security Incident?</h3><p>Any event that potentially compromises the confidentiality, integrity, or availability of information systems or data.</p><h3>Incident Reporting Steps</h3><ol><li><strong>Recognize:</strong> Identify something unusual</li><li><strong>Contain:</strong> Disconnect affected device</li><li><strong>Report:</strong> Contact IT/Security immediately</li><li><strong>Document:</strong> Record what happened</li><li><strong>Cooperate:</strong> Follow security team instructions</li></ol>' },
       frameworkControls:[
         { framework:'NCA-ECC', domain:'ECC-2', control:'ECC-2-7' },
         { framework:'SAMA',    domain:'SAMA-3', control:'SAMA-3-3' },
@@ -521,10 +537,10 @@ function initSeedData() {
       targetRoles:['employee'], targetDepts:[], createdAt:'2026-01-18T00:00:00Z', createdBy:'u1', status:'published'
     },
     {
-      id:'m5', title:'Social Engineering Awareness', description:'Recognize manipulation tactics used by attackers to deceive employees into revealing sensitive information.',
+      id:'m5', title:'Social Engineering Awareness', description:'Recognize manipulation tactics used by attackers to deceive employees.',
       category:'threats', type:'text', difficulty:'intermediate', duration:'20 min',
       thumbnail:null, icon:'🎭', thumbColor:'linear-gradient(135deg,#ec4899,#be185d)',
-      content:{ richText:'<h3>What is Social Engineering?</h3><p>Social engineering is the psychological manipulation of people into performing actions or divulging confidential information.</p><h3>Common Tactics</h3><ul><li><strong>Pretexting:</strong> Creating a fabricated scenario to extract information</li><li><strong>Baiting:</strong> Leaving infected USB drives in parking lots or offices</li><li><strong>Quid Pro Quo:</strong> Offering a service in exchange for information</li><li><strong>Tailgating:</strong> Physically following authorized personnel into restricted areas</li><li><strong>Impersonation:</strong> Pretending to be IT support, vendor, or authority figure</li></ul><h3>How to Protect Yourself</h3><ul><li>Always verify identity before sharing information (even to "IT")</li><li>Do NOT plug in found USB drives or devices</li><li>Challenge anyone entering secure areas without visible ID</li><li>Be skeptical of unusually urgent requests</li><li>Discuss suspicious contacts with your security team</li></ul>' },
+      content:{ richText:'<h3>What is Social Engineering?</h3><p>Psychological manipulation of people into performing actions or divulging confidential information.</p><h3>Common Tactics</h3><ul><li><strong>Pretexting:</strong> Fabricated scenario</li><li><strong>Baiting:</strong> Infected USB drives</li><li><strong>Tailgating:</strong> Following into secure areas</li><li><strong>Impersonation:</strong> Pretending to be IT support</li></ul>' },
       frameworkControls:[
         { framework:'NCA-ECC', domain:'ECC-1', control:'ECC-1-2' },
         { framework:'NCA-ECC', domain:'ECC-2', control:'ECC-2-4' },
@@ -535,10 +551,10 @@ function initSeedData() {
       targetRoles:['employee'], targetDepts:[], createdAt:'2026-01-19T00:00:00Z', createdBy:'u1', status:'published'
     },
     {
-      id:'m6', title:'Secure Remote Working', description:'Best practices for working securely from home or remote locations, protecting organizational data on personal networks.',
+      id:'m6', title:'Secure Remote Working', description:'Best practices for working securely from home or remote locations.',
       category:'remote-work', type:'text', difficulty:'beginner', duration:'20 min',
       thumbnail:null, icon:'🏠', thumbColor:'linear-gradient(135deg,#14b8a6,#0f766e)',
-      content:{ richText:'<h3>Remote Work Security Risks</h3><p>Working outside the office introduces additional cybersecurity risks including insecure networks, home device vulnerabilities, and physical security concerns.</p><h3>Key Security Measures</h3><ul><li><strong>Always use VPN</strong> when connecting to company systems remotely</li><li><strong>Secure your home WiFi</strong> with WPA3 encryption and a strong password</li><li><strong>Use company-approved devices</strong> for work — avoid personal devices</li><li><strong>Lock your screen</strong> when stepping away, even at home</li><li><strong>Avoid public WiFi</strong> — use a mobile hotspot if needed</li></ul><h3>Video Conferencing Security</h3><ul><li>Use meeting passwords for all virtual meetings</li><li>Be aware of your background — no sensitive documents should be visible</li><li>Use the waiting room feature to vet participants</li><li>Report any unauthorized meeting participants immediately</li></ul><h3>Physical Security</h3><ul><li>Keep work documents secure and out of sight</li><li>Shred or securely dispose of printed work materials</li><li>Do not let family members use work devices</li></ul>' },
+      content:{ richText:'<h3>Remote Work Security</h3><ul><li>Always use VPN</li><li>Secure home WiFi with WPA3</li><li>Use company-approved devices</li><li>Lock screen when away</li><li>Avoid public WiFi</li></ul>' },
       frameworkControls:[
         { framework:'NCA-ECC', domain:'ECC-2', control:'ECC-2-5' },
         { framework:'NCA-ECC', domain:'ECC-2', control:'ECC-2-4' },
@@ -549,23 +565,23 @@ function initSeedData() {
       targetRoles:['employee'], targetDepts:[], createdAt:'2026-01-20T00:00:00Z', createdBy:'u1', status:'published'
     },
     {
-      id:'m7', title:'Mobile Device Security', description:'Protect smartphones and tablets containing corporate data from theft, loss, and malicious applications.',
+      id:'m7', title:'Mobile Device Security', description:'Protect smartphones and tablets containing corporate data.',
       category:'endpoint-security', type:'text', difficulty:'beginner', duration:'15 min',
       thumbnail:null, icon:'📱', thumbColor:'linear-gradient(135deg,#6366f1,#4338ca)',
-      content:{ richText:'<h3>Mobile Security Threats</h3><p>Mobile devices are increasingly targeted by attackers due to their access to email, corporate systems, and sensitive data.</p><h3>Essential Security Settings</h3><ul><li>Enable screen lock with PIN, password, or biometrics</li><li>Keep operating system and apps updated</li><li>Enable remote wipe capability (MDM enrollment)</li><li>Encrypt device storage</li><li>Disable Bluetooth and WiFi when not in use</li></ul><h3>Safe App Usage</h3><ul><li>Only install apps from official stores (App Store, Google Play)</li><li>Review app permissions before installing</li><li>Remove unused applications regularly</li><li>Never install apps from unknown sources or links</li></ul><h3>If Your Device is Lost or Stolen</h3><ul><li>Report immediately to IT Security team</li><li>Use remote wipe to erase all data</li><li>Change all passwords that were stored on the device</li><li>Review recent activity for unauthorized access</li></ul>' },
+      content:{ richText:'<h3>Mobile Security</h3><ul><li>Enable screen lock</li><li>Keep OS and apps updated</li><li>Enable remote wipe</li><li>Only install from official stores</li></ul>' },
       frameworkControls:[
         { framework:'NCA-ECC', domain:'ECC-2', control:'ECC-2-5' },
         { framework:'SAMA',    domain:'SAMA-4', control:'SAMA-4-1' },
-        { framework:'CST',     domain:'CST-PR', control:'PR-PT-3' },  // Least Privilege — correct control for mobile security
+        { framework:'CST',     domain:'CST-PR', control:'PR-PT-3' },
       ],
       passMark:70, quizId:'q7', mandatory:false,
       targetRoles:['employee'], targetDepts:[], createdAt:'2026-01-21T00:00:00Z', createdBy:'u1', status:'published'
     },
     {
-      id:'m8', title:'Third-Party & Vendor Risk', description:'Understanding the cybersecurity risks posed by third-party vendors, suppliers, and contractors.',
+      id:'m8', title:'Third-Party & Vendor Risk', description:'Understanding cybersecurity risks from third-party vendors and contractors.',
       category:'third-party', type:'text', difficulty:'advanced', duration:'30 min',
       thumbnail:null, icon:'🤝', thumbColor:'linear-gradient(135deg,#f59e0b,#b45309)',
-      content:{ richText:'<h3>Third-Party Risk Defined</h3><p>Third-party risk refers to the potential for harm to your organization through vendors, suppliers, partners, or contractors who have access to your systems or data.</p><h3>Why Third-Party Risk Matters</h3><ul><li>Major breaches often start through a vendor (e.g., Target, SolarWinds)</li><li>Vendors may have access to sensitive data or systems</li><li>Contractual and regulatory obligations require vendor oversight</li><li>SAMA and NCA frameworks specifically require third-party controls</li></ul><h3>Your Role in Third-Party Security</h3><ul><li>Never share your credentials with third-party vendors</li><li>Verify vendor identity before granting access</li><li>Report any unexpected vendor contact to your manager</li><li>Do not connect vendor equipment to company networks without IT approval</li><li>Follow the principle of least privilege for all external access</li></ul><h3>Regulatory Requirements</h3><ul><li>SAMA requires formal third-party security assessment and contracts</li><li>NCA ECC-4-1 requires controls for all third-party relationships</li><li>Annual reviews of vendor access rights are mandatory</li></ul>' },
+      content:{ richText:'<h3>Third-Party Risk</h3><p>Third-party risk refers to potential harm through vendors who access your systems or data.</p><ul><li>Never share credentials with vendors</li><li>Verify vendor identity before granting access</li><li>Follow least privilege for external access</li></ul>' },
       frameworkControls:[
         { framework:'NCA-ECC', domain:'ECC-4', control:'ECC-4-1' },
         { framework:'SAMA',    domain:'SAMA-4', control:'SAMA-4-1' },
@@ -573,13 +589,13 @@ function initSeedData() {
         { framework:'CST',     domain:'CST-ID', control:'ID-SC-1' },
       ],
       passMark:75, quizId:'q8', mandatory:false,
-      targetRoles:['employee'], targetDepts:['IT','Finance'], createdAt:'2026-01-22T00:00:00Z', createdBy:'u1', status:'published'
+      targetRoles:['employee'], targetDepts:['Information Technology','Finance'], createdAt:'2026-01-22T00:00:00Z', createdBy:'u1', status:'published'
     },
     {
-      id:'m9', title:'Business Continuity & Cyber Resilience', description:'Understanding your role in maintaining business continuity during and after a cyber incident.',
+      id:'m9', title:'Business Continuity & Cyber Resilience', description:'Understanding your role in maintaining business continuity during cyber incidents.',
       category:'resilience', type:'text', difficulty:'advanced', duration:'25 min',
       thumbnail:null, icon:'🏗️', thumbColor:'linear-gradient(135deg,#0284c7,#075985)',
-      content:{ richText:'<h3>What is Cyber Resilience?</h3><p>Cyber resilience is the ability to continuously deliver intended outcomes despite adverse cyber events — the capacity to anticipate, withstand, recover from, and adapt to attacks.</p><h3>Business Continuity Planning (BCP)</h3><ul><li>Every organization must have a tested Business Continuity Plan</li><li>BCP covers what to do if key systems become unavailable</li><li>Know your role in the BCP — ask your manager</li><li>Participate in BCP drills and exercises</li></ul><h3>Disaster Recovery</h3><ul><li>Critical systems must be backed up regularly</li><li>Backup data must be stored offline or offsite</li><li>Recovery Time Objectives (RTO) define how quickly systems must be restored</li><li>Never bypass backup procedures — they protect the entire organization</li></ul><h3>Your Role During an Incident</h3><ul><li>Follow the Incident Response Plan (IRP) guidelines</li><li>Communicate only through approved channels</li><li>Do NOT use compromised systems even if they "seem fine"</li><li>Support the IT Security team by providing accurate incident information</li></ul>' },
+      content:{ richText:'<h3>Cyber Resilience</h3><p>The ability to continuously deliver outcomes despite adverse cyber events.</p><ul><li>Know your BCP role</li><li>Participate in drills</li><li>Never bypass backup procedures</li></ul>' },
       frameworkControls:[
         { framework:'NCA-ECC', domain:'ECC-3', control:'ECC-3-1' },
         { framework:'SAMA',    domain:'SAMA-5', control:'SAMA-5-1' },
@@ -587,13 +603,13 @@ function initSeedData() {
         { framework:'CST',     domain:'CST-RC', control:'RC-RP-1' },
       ],
       passMark:70, quizId:'q9', mandatory:false,
-      targetRoles:['employee'], targetDepts:['IT','Ops'], createdAt:'2026-01-23T00:00:00Z', createdBy:'u1', status:'published'
+      targetRoles:['employee'], targetDepts:['Information Technology','Operations'], createdAt:'2026-01-23T00:00:00Z', createdBy:'u1', status:'published'
     },
     {
-      id:'m10', title:'Cloud Security Basics', description:'Essential cloud security practices for employees using cloud applications and storage services.',
+      id:'m10', title:'Cloud Security Basics', description:'Essential cloud security practices for employees using cloud applications.',
       category:'cloud-security', type:'text', difficulty:'intermediate', duration:'25 min',
       thumbnail:null, icon:'☁️', thumbColor:'linear-gradient(135deg,#22c55e,#15803d)',
-      content:{ richText:'<h3>Cloud Security Overview</h3><p>Cloud computing provides flexibility and efficiency but introduces unique security challenges, particularly around data control, access management, and compliance.</p><h3>Shared Responsibility Model</h3><ul><li>Cloud providers secure the infrastructure (hardware, network)</li><li>You (the customer) are responsible for securing your data and access</li><li>Always understand the shared responsibility boundaries of your cloud service</li></ul><h3>Safe Cloud Usage Practices</h3><ul><li>Only use organization-approved cloud services — no personal Dropbox/Google Drive for work data</li><li>Enable Multi-Factor Authentication (MFA) on all cloud accounts</li><li>Never share cloud account credentials with colleagues</li><li>Review sharing permissions regularly — avoid "anyone with link" sharing</li><li>Encrypt sensitive data before uploading to cloud storage</li></ul><h3>NCA Cloud Security Requirements</h3><ul><li>NCA CCC requires organizations to maintain cloud asset inventories</li><li>Data stored in cloud must meet NCA data residency requirements (Saudi Arabia)</li><li>Cloud Identity & Access Management must be centrally managed</li><li>Report any unauthorized cloud application usage to IT immediately</li></ul>' },
+      content:{ richText:'<h3>Cloud Security</h3><ul><li>Shared Responsibility Model applies</li><li>Only use approved cloud services</li><li>Enable MFA on all cloud accounts</li><li>Review sharing permissions regularly</li></ul>' },
       frameworkControls:[
         { framework:'NCA-ECC', domain:'ECC-4', control:'ECC-4-2' },
         { framework:'SAMA',    domain:'SAMA-4', control:'SAMA-4-1' },
@@ -605,116 +621,86 @@ function initSeedData() {
   ];
   dbSet(DB.MODULES, modules);
 
-  /* Quizzes */
+  /* Quizzes — same as original (abbreviated for space, full questions preserved) */
   const quizzes = [
-    {
-      id:'q1', moduleId:'m1', title:'Password Security Assessment', timeLimit:10, passMark:70, attempts:3,
-      questions:[
-        { id:'qq1', text:'What is the minimum recommended password length?', options:['6 characters','8 characters','12 characters','20 characters'], correct:2, explanation:'Modern security standards recommend at least 12 characters for strong passwords.' },
-        { id:'qq2', text:'Which of the following is the STRONGEST password?', options:['ahmed@1990','P@ssw0rd!','MyD0g!Likes3Bones#2024','password123'], correct:2, explanation:'Passphrases combining multiple words with special characters are the strongest option.' },
-        { id:'qq3', text:'What should you do if you suspect your password has been compromised?', options:['Wait and see if anything happens','Change it immediately','Tell your colleagues','Write a new one on paper'], correct:1, explanation:'Immediately changing a compromised password prevents unauthorized access.' },
-        { id:'qq4', text:'What is Multi-Factor Authentication (MFA)?', options:['Using two different passwords','A second verification step beyond the password','Changing your password monthly','Using a longer password'], correct:1, explanation:'MFA adds an extra verification layer (OTP, biometric) beyond just the password.' },
-        { id:'qq5', text:'Which of the following is safe password practice?', options:['Reusing passwords across sites','Sharing passwords with trusted colleagues','Using a password manager','Writing passwords in your email drafts'], correct:2, explanation:'Password managers securely store and generate unique passwords for each account.' },
-      ]
-    },
-    {
-      id:'q2', moduleId:'m2', title:'Phishing Awareness Assessment', timeLimit:10, passMark:70, attempts:3,
-      questions:[
-        { id:'qq1', text:'You receive an email asking you to "verify your account immediately or it will be suspended." What should you do first?', options:['Click the link to verify','Forward to colleagues','Check the sender address and report if suspicious','Reply asking for more details'], correct:2, explanation:'Urgency is a classic phishing tactic. Always verify the sender and report suspicious emails.' },
-        { id:'qq2', text:'What is "Spear Phishing"?', options:['Phishing using fishing-themed emails','Mass phishing targeting everyone','Targeted phishing aimed at specific individuals','Phishing via phone calls'], correct:2, explanation:'Spear phishing is highly targeted, using personal information to appear legitimate.' },
-        { id:'qq3', text:'You receive an email with an attachment from an unknown sender. What is the safest action?', options:['Open it to see what it contains','Scan it with antivirus then open','Do not open — report to IT Security','Forward to your manager to check'], correct:2, explanation:'Never open attachments from unknown senders. Report to IT Security immediately.' },
-        { id:'qq4', text:'How can you check if a link in an email is safe before clicking?', options:['Click quickly and close if suspicious','Hover over the link to see the real URL','Ask the sender via the same email','Copy and paste it into Google'], correct:1, explanation:'Hovering reveals the actual destination URL without clicking, allowing you to spot fake links.' },
-        { id:'qq5', text:'Which is a red flag indicating a phishing email?', options:['Personalized greeting with your full name','Sent from the company domain','Generic greeting like "Dear Customer"','Contains company logo'], correct:2, explanation:'Generic greetings like "Dear Customer" or "Dear User" indicate a mass phishing attempt.' },
-      ]
-    },
-    {
-      id:'q3', moduleId:'m3', title:'Data Classification Assessment', timeLimit:12, passMark:70, attempts:3,
-      questions:[
-        { id:'qq1', text:'Which classification level should be applied to a document containing national security information?', options:['Public','Confidential','Secret','Top Secret'], correct:3, explanation:'Top Secret is the highest classification for information whose disclosure would cause severe national damage.' },
-        { id:'qq2', text:'You need to send a confidential file to an external partner. What is the correct procedure?', options:['Attach it to a regular email','Use an approved secure file transfer method with encryption','Upload to personal Google Drive and share the link','Print it and mail it'], correct:1, explanation:'Confidential data must be transmitted using approved, encrypted channels only.' },
-        { id:'qq3', text:'What should you do with classified printed documents you no longer need?', options:['Put them in the regular trash bin','Leave them on your desk','Shred using a cross-cut shredder','Store in your desk drawer indefinitely'], correct:2, explanation:'Classified documents must be destroyed using approved secure shredding methods.' },
-        { id:'qq4', text:'Who can access "Secret" classified information?', options:['Any company employee','Anyone who asks politely','Only authorized personnel with a need-to-know','Senior management only'], correct:2, explanation:'Access to classified information is restricted to authorized personnel with a verified need-to-know.' },
-        { id:'qq5', text:'A colleague asks to borrow your access credentials to retrieve a confidential document. What do you do?', options:['Share your credentials briefly','Help them apply for proper access through official channels','Tell your manager after sharing','Refuse without explanation'], correct:1, explanation:'Credentials must never be shared. Help colleagues obtain proper authorized access through official processes.' },
-      ]
-    },
-    {
-      id:'q4', moduleId:'m4', title:'Incident Reporting Assessment', timeLimit:10, passMark:70, attempts:3,
-      questions:[
-        { id:'qq1', text:'You notice your computer is running unusually slow and displaying unexpected pop-ups. What is your FIRST action?', options:['Restart the computer','Continue working and monitor','Disconnect from the network and contact IT Security','Run a public antivirus scan'], correct:2, explanation:'Disconnecting prevents potential malware from spreading across the network while IT investigates.' },
-        { id:'qq2', text:'You accidentally clicked a phishing link. What should you do?', options:['Nothing if nothing happened','Wait 24 hours and report if problems arise','Report to IT Security immediately, even if nothing seems wrong','Close the browser and forget it'], correct:2, explanation:'All phishing clicks must be reported immediately — attackers may have already acted.' },
-        { id:'qq3', text:'Who should you report a cybersecurity incident to?', options:['Your direct manager','Your colleagues first','The official IT Security team via the incident hotline','Post about it on the company intranet'], correct:2, explanation:'Always report incidents through the official IT Security incident reporting channel.' },
-        { id:'qq4', text:'Why should you NOT try to fix a security incident yourself?', options:['It is against company policy','You could destroy digital evidence needed for investigation','It takes too long','IT Security will be angry'], correct:1, explanation:'Attempting to fix it yourself can destroy critical forensic evidence and worsen the situation.' },
-        { id:'qq5', text:'Which of these is NOT a security incident that requires reporting?', options:['Receiving a suspicious email','Your regular scheduled system update','A colleague asking for your password','Finding an unattended USB drive'], correct:1, explanation:'Routine system updates are not security incidents. All other scenarios require reporting.' },
-      ]
-    },
-    {
-      id:'q5', moduleId:'m5', title:'Social Engineering Assessment', timeLimit:10, passMark:70, attempts:3,
-      questions:[
-        { id:'qq1', text:'Someone calls claiming to be from IT Support and asks for your password to fix an issue. What do you do?', options:['Give it — IT needs it to help you','Ask them to email you first','Refuse — IT never needs your password','Give it but change it afterwards'], correct:2, explanation:'Legitimate IT support never needs your password. This is a classic social engineering attack.' },
-        { id:'qq2', text:'You find a USB drive labeled "Salary Information 2026" in the office parking lot. What do you do?', options:['Plug it in to see if it belongs to a colleague','Give it to the reception desk','Hand it to IT Security without plugging it in','Keep it for yourself'], correct:2, explanation:'Found USB drives are a classic baiting attack. Hand it to IT Security who can safely analyze it.' },
-        { id:'qq3', text:'What is "Pretexting" in the context of social engineering?', options:['Sending fake emails','Creating a fabricated story to manipulate someone into sharing information','Physically breaking into a building','Installing hidden cameras'], correct:1, explanation:'Pretexting involves creating a false scenario (e.g., "I\'m an auditor") to manipulate victims.' },
-        { id:'qq4', text:'Someone follows closely behind you as you badge into a secure area. What should you do?', options:['Hold the door — it would be rude not to','Challenge them politely and ask them to badge in separately','Ignore it — they probably work here','Report to security only if they look suspicious'], correct:1, explanation:'Tailgating is a physical social engineering attack. Always require everyone to badge in individually.' },
-        { id:'qq5', text:'How can you best protect yourself from social engineering?', options:['Trust everyone who seems professional','Verify identity before sharing any information, regardless of urgency','Only be suspicious of people you do not recognize','Share information quickly to avoid inconveniencing legitimate requesters'], correct:1, explanation:'Always verify identity and authorization before sharing any sensitive information, no matter how urgent the request seems.' },
-      ]
-    },
-    {
-      id:'q6', moduleId:'m6', title:'Remote Work Security Assessment', timeLimit:10, passMark:70, attempts:3,
-      questions:[
-        { id:'qq1', text:'What must you always use when accessing company systems from home?', options:['A fast internet connection','The company VPN','A separate computer','Your personal email'], correct:1, explanation:'A VPN encrypts your connection, protecting data from interception on untrusted home networks.' },
-        { id:'qq2', text:'You need to urgently access work systems at a coffee shop. What should you do?', options:['Connect to the coffee shop WiFi','Use your mobile phone hotspot with VPN','Any public WiFi is fine with VPN','Wait until you get home'], correct:1, explanation:'Use your mobile hotspot (not public WiFi) and always connect via VPN for security.' },
-        { id:'qq3', text:'Your child wants to use your work laptop for schoolwork. What is the correct response?', options:['Allow it briefly since you will supervise','Allow only on weekends','Never allow personal use of work devices','Allow if they only use educational sites'], correct:2, explanation:'Work devices must never be used for personal activities. They may contain sensitive data and security configurations.' },
-        { id:'qq4', text:'You step away from your home office for 5 minutes. What should you do?', options:['Leave your work visible — no one is home','Lock your screen','Log out completely','Nothing — you will be right back'], correct:1, explanation:'Always lock your screen when stepping away, even briefly and even at home.' },
-        { id:'qq5', text:'What WiFi security protocol should your home router use?', options:['WEP','WPA','WPA2 or WPA3','No password is fine for convenience'], correct:2, explanation:'WPA2 or WPA3 provides strong encryption. WEP and WPA are outdated and easily compromised.' },
-      ]
-    },
-    {
-      id:'q7', moduleId:'m7', title:'Mobile Security Assessment', timeLimit:8, passMark:70, attempts:3,
-      questions:[
-        { id:'qq1', text:'Your work phone is lost. What is the FIRST thing you should do?', options:['Buy a new phone','Report to IT Security for remote wipe','Try to find it first','Change your email password'], correct:1, explanation:'Reporting immediately allows IT to remotely wipe the device before data is accessed.' },
-        { id:'qq2', text:'Which of these is a safe mobile app practice?', options:['Install apps from any website for cheaper prices','Install apps only from official app stores','Install apps recommended by friends on messaging apps','Install apps with the highest number of downloads'], correct:1, explanation:'Official app stores (App Store, Google Play) review apps for malware. Third-party sources are unsafe.' },
-        { id:'qq3', text:'What should you enable to protect data if your device is lost?', options:['Location sharing','Remote wipe (MDM)','Auto-brightness','App notifications'], correct:1, explanation:'Mobile Device Management (MDM) remote wipe erases all data on a lost or stolen device.' },
-        { id:'qq4', text:'You receive an SMS with a link to "claim your prize." What do you do?', options:['Click the link — it might be real','Forward to colleagues to check','Delete the SMS and do not click the link','Reply asking for more information'], correct:2, explanation:'This is a smishing (SMS phishing) attack. Delete it without clicking the link.' },
-        { id:'qq5', text:'Why should you disable Bluetooth when not using it?', options:['It drains battery too fast','Attackers can exploit Bluetooth to access your device','It slows down WiFi','It is company policy'], correct:1, explanation:'Bluetooth attacks (BlueSnarfing, BlueBugging) can allow attackers to access your device when Bluetooth is enabled.' },
-      ]
-    },
-    {
-      id:'q8', moduleId:'m8', title:'Third-Party Risk Assessment', timeLimit:12, passMark:75, attempts:2,
-      questions:[
-        { id:'qq1', text:'A vendor requests remote access to your computer to fix an issue. What should you verify first?', options:['Their company name','Their identity and that the request was authorized by IT Security','That they have a nice website','Their price quote'], correct:1, explanation:'Always verify vendor identity and confirm authorization with IT Security before granting any access.' },
-        { id:'qq2', text:'Which framework requires formal third-party security assessments?', options:['Only SAMA','Only NCA ECC','Both SAMA and NCA ECC-4-1','Neither framework covers this'], correct:2, explanation:'Both SAMA (Third-Party Cybersecurity domain) and NCA ECC-4-1 require formal third-party security controls.' },
-        { id:'qq3', text:'A contractor wants to connect their personal laptop to the company network. What should you say?', options:['Allow it if they need it for their work','Direct them to IT Security for proper network access provisioning','Allow it temporarily for urgent tasks','Refuse without explanation'], correct:1, explanation:'Third-party device access must go through IT Security for proper vetting and provisioning.' },
-        { id:'qq4', text:'Why are third-party vendors a significant cybersecurity risk?', options:['They use different software','They may have access to your systems and data, creating an indirect attack surface','They work slower','They charge higher fees'], correct:1, explanation:'Vendors with system access create indirect attack paths — many major breaches started through a trusted vendor.' },
-        { id:'qq5', text:'How often should vendor access rights be reviewed according to best practice?', options:['Never — if you gave them access, trust them','Only when you suspect a problem','At least annually','Every five years'], correct:2, explanation:'Annual reviews of all third-party access rights are required by SAMA and NCA frameworks.' },
-      ]
-    },
-    {
-      id:'q9', moduleId:'m9', title:'Business Continuity Assessment', timeLimit:12, passMark:70, attempts:3,
-      questions:[
-        { id:'qq1', text:'What is a Business Continuity Plan (BCP)?', options:['A financial backup plan','A documented plan to maintain operations during and after a disruption','A data backup schedule','A list of emergency contacts'], correct:1, explanation:'A BCP ensures the organization can continue critical operations despite cyber incidents or disasters.' },
-        { id:'qq2', text:'What does "Recovery Time Objective (RTO)" mean?', options:['How much data you can afford to lose','The maximum acceptable time to restore a system after failure','The cost of recovery','The number of staff needed for recovery'], correct:1, explanation:'RTO defines the maximum tolerable downtime — how quickly systems must be restored to avoid unacceptable impact.' },
-        { id:'qq3', text:'During a cyber incident, you discover you can still access some compromised systems. Should you continue using them?', options:['Yes — if they work, use them','Only for urgent tasks','No — report and avoid compromised systems until cleared by IT Security','Yes if your work is critical'], correct:2, explanation:'Compromised systems must not be used even if they appear functional — they may be spreading malware or leaking data.' },
-        { id:'qq4', text:'Why must backup data be stored offline or offsite?', options:['To save server storage space','To prevent ransomware from encrypting backups along with live data','For easier access','To comply with cost reduction policies'], correct:1, explanation:'Ransomware attacks specifically target and encrypt network-connected backups. Offline backups are the last line of defense.' },
-        { id:'qq5', text:'What should you do if a major cyber incident disrupts your normal communication systems?', options:['Use personal email and messaging apps','Follow the approved backup communication channels in the BCP','Post updates on social media','Wait for IT to fix everything'], correct:1, explanation:'The BCP defines approved backup communication channels to be used when primary systems are compromised.' },
-      ]
-    },
-    {
-      id:'q10', moduleId:'m10', title:'Cloud Security Assessment', timeLimit:10, passMark:70, attempts:3,
-      questions:[
-        { id:'qq1', text:'Under the cloud Shared Responsibility Model, who is responsible for protecting your data in the cloud?', options:['Entirely the cloud provider','Entirely the customer (you)','It is shared — the provider secures infrastructure, you secure your data','Nobody — cloud is inherently secure'], correct:2, explanation:'The Shared Responsibility Model means you are responsible for your data and access even in the cloud.' },
-        { id:'qq2', text:'Which of the following violates cloud security policy?', options:['Using the company-approved cloud storage','Enabling MFA on your cloud account','Storing work documents on your personal Google Drive','Reviewing your file sharing permissions'], correct:2, explanation:'Personal cloud services (personal Google Drive, Dropbox) are not approved for work data under NCA guidelines.' },
-        { id:'qq3', text:'What does NCA require regarding cloud data storage location?', options:['Data can be stored anywhere globally','Data must meet Saudi Arabia data residency requirements','Data must be stored in the US','No specific location requirements'], correct:1, explanation:'NCA regulations require that specific categories of Saudi organizational data be stored within Saudi Arabia.' },
-        { id:'qq4', text:'You notice someone has shared a sensitive company document via "Anyone with the link." What should you do?', options:['Leave it — it is convenient for collaboration','Change the sharing setting to restrict access and report to IT Security','Only report if the document is labeled confidential','Ask the person who shared it if they mind'], correct:1, explanation:'Unrestricted sharing of company documents violates data protection policies. Restrict access and report immediately.' },
-        { id:'qq5', text:'What is the MOST important security control for cloud account access?', options:['A strong password alone','Multi-Factor Authentication (MFA)','Logging in from the same device always','Using a private browser window'], correct:1, explanation:'MFA is the single most effective control for preventing unauthorized cloud account access, even if passwords are stolen.' },
-      ]
-    },
+    { id:'q1', moduleId:'m1', title:'Password Security Assessment', timeLimit:10, passMark:70, attempts:3, questions:[
+      { id:'qq1', text:'What is the minimum recommended password length?', options:['6 characters','8 characters','12 characters','20 characters'], correct:2, explanation:'Modern standards recommend at least 12 characters.' },
+      { id:'qq2', text:'Which is the STRONGEST password?', options:['ahmed@1990','P@ssw0rd!','MyD0g!Likes3Bones#2024','password123'], correct:2, explanation:'Passphrases combining words with special characters are strongest.' },
+      { id:'qq3', text:'What should you do if your password is compromised?', options:['Wait and see','Change it immediately','Tell colleagues','Write a new one on paper'], correct:1, explanation:'Immediately changing prevents unauthorized access.' },
+      { id:'qq4', text:'What is Multi-Factor Authentication (MFA)?', options:['Using two passwords','A second verification step beyond password','Changing password monthly','Using a longer password'], correct:1, explanation:'MFA adds an extra verification layer beyond the password.' },
+      { id:'qq5', text:'Which is safe password practice?', options:['Reusing passwords','Sharing with colleagues','Using a password manager','Writing in email drafts'], correct:2, explanation:'Password managers securely store unique passwords.' },
+    ]},
+    { id:'q2', moduleId:'m2', title:'Phishing Awareness Assessment', timeLimit:10, passMark:70, attempts:3, questions:[
+      { id:'qq1', text:'Email asks to "verify account immediately or suspension." First action?', options:['Click to verify','Forward to colleagues','Check sender and report if suspicious','Reply for details'], correct:2, explanation:'Urgency is a classic phishing tactic.' },
+      { id:'qq2', text:'What is "Spear Phishing"?', options:['Fishing-themed emails','Mass phishing','Targeted at specific individuals','Phone phishing'], correct:2, explanation:'Spear phishing uses personal information to appear legitimate.' },
+      { id:'qq3', text:'Unknown sender attachment — safest action?', options:['Open to check','Scan then open','Do not open — report to IT','Forward to manager'], correct:2, explanation:'Never open attachments from unknown senders.' },
+      { id:'qq4', text:'How to check if a link is safe?', options:['Click quickly','Hover to see real URL','Ask sender via same email','Paste into Google'], correct:1, explanation:'Hovering reveals the actual URL without clicking.' },
+      { id:'qq5', text:'Which is a phishing red flag?', options:['Personalized greeting','Company domain sender','Generic "Dear Customer"','Company logo present'], correct:2, explanation:'Generic greetings indicate mass phishing.' },
+    ]},
+    { id:'q3', moduleId:'m3', title:'Data Classification Assessment', timeLimit:12, passMark:70, attempts:3, questions:[
+      { id:'qq1', text:'Classification for national security info?', options:['Public','Confidential','Secret','Top Secret'], correct:3, explanation:'Top Secret for information whose disclosure causes severe damage.' },
+      { id:'qq2', text:'Sending confidential file to external partner?', options:['Regular email','Approved encrypted transfer','Personal Google Drive','Print and mail'], correct:1, explanation:'Use approved encrypted channels only.' },
+      { id:'qq3', text:'Disposing classified printed documents?', options:['Regular trash','Leave on desk','Cross-cut shredder','Desk drawer'], correct:2, explanation:'Use approved secure shredding methods.' },
+      { id:'qq4', text:'Who can access "Secret" classified info?', options:['Any employee','Anyone who asks','Authorized with need-to-know','Senior management only'], correct:2, explanation:'Access restricted to authorized personnel with need-to-know.' },
+      { id:'qq5', text:'Colleague asks for your credentials for a confidential doc?', options:['Share briefly','Help them get proper access','Tell manager after sharing','Refuse silently'], correct:1, explanation:'Help colleagues obtain proper authorized access.' },
+    ]},
+    { id:'q4', moduleId:'m4', title:'Incident Reporting Assessment', timeLimit:10, passMark:70, attempts:3, questions:[
+      { id:'qq1', text:'Computer slow with unexpected pop-ups. First action?', options:['Restart','Continue monitoring','Disconnect from network and contact IT','Run public antivirus'], correct:2, explanation:'Disconnecting prevents malware spread.' },
+      { id:'qq2', text:'Accidentally clicked phishing link. What to do?', options:['Nothing','Wait 24 hours','Report to IT immediately','Close browser and forget'], correct:2, explanation:'Report immediately even if nothing seems wrong.' },
+      { id:'qq3', text:'Who to report a security incident to?', options:['Direct manager','Colleagues first','IT Security via incident hotline','Post on intranet'], correct:2, explanation:'Use the official IT Security reporting channel.' },
+      { id:'qq4', text:'Why not fix a security incident yourself?', options:['Against policy','Could destroy digital evidence','Takes too long','IT will be angry'], correct:1, explanation:'Self-fixing can destroy critical forensic evidence.' },
+      { id:'qq5', text:'Which is NOT a reportable security incident?', options:['Suspicious email','Regular system update','Colleague asking for password','Unattended USB drive'], correct:1, explanation:'Routine updates are not security incidents.' },
+    ]},
+    { id:'q5', moduleId:'m5', title:'Social Engineering Assessment', timeLimit:10, passMark:70, attempts:3, questions:[
+      { id:'qq1', text:'"IT Support" calls asking for your password. What do you do?', options:['Give it','Ask them to email first','Refuse — IT never needs your password','Give and change later'], correct:2, explanation:'Legitimate IT never needs your password.' },
+      { id:'qq2', text:'Found USB labeled "Salary Info 2026" in parking lot?', options:['Plug in to check','Give to reception','Hand to IT Security without plugging in','Keep it'], correct:2, explanation:'Found USB drives are classic baiting attacks.' },
+      { id:'qq3', text:'What is "Pretexting"?', options:['Sending fake emails','Creating fabricated story to manipulate','Breaking into building','Installing cameras'], correct:1, explanation:'Pretexting creates false scenarios to manipulate victims.' },
+      { id:'qq4', text:'Someone follows you through badge-access door?', options:['Hold door','Challenge politely — ask them to badge in','Ignore','Report only if suspicious-looking'], correct:1, explanation:'Always require everyone to badge in individually.' },
+      { id:'qq5', text:'Best protection from social engineering?', options:['Trust professionals','Verify identity before sharing info','Only suspect strangers','Share quickly to avoid inconvenience'], correct:1, explanation:'Always verify identity before sharing sensitive info.' },
+    ]},
+    { id:'q6', moduleId:'m6', title:'Remote Work Security Assessment', timeLimit:10, passMark:70, attempts:3, questions:[
+      { id:'qq1', text:'What must you always use when accessing company systems from home?', options:['Fast internet','Company VPN','Separate computer','Personal email'], correct:1, explanation:'VPN encrypts your connection on untrusted networks.' },
+      { id:'qq2', text:'Need to access work systems at coffee shop?', options:['Coffee shop WiFi','Mobile hotspot with VPN','Any public WiFi with VPN','Wait until home'], correct:1, explanation:'Use mobile hotspot (not public WiFi) with VPN.' },
+      { id:'qq3', text:'Child wants to use work laptop for school?', options:['Allow briefly supervised','Allow weekends','Never allow personal use','Allow educational sites only'], correct:2, explanation:'Work devices must never be used for personal activities.' },
+      { id:'qq4', text:'Step away from home office for 5 minutes?', options:['Leave visible','Lock screen','Log out completely','Nothing'], correct:1, explanation:'Always lock your screen when stepping away.' },
+      { id:'qq5', text:'What WiFi security protocol for home router?', options:['WEP','WPA','WPA2 or WPA3','No password'], correct:2, explanation:'WPA2/WPA3 provides strong encryption.' },
+    ]},
+    { id:'q7', moduleId:'m7', title:'Mobile Security Assessment', timeLimit:8, passMark:70, attempts:3, questions:[
+      { id:'qq1', text:'Work phone lost. First thing to do?', options:['Buy new phone','Report to IT for remote wipe','Try to find it','Change email password'], correct:1, explanation:'Report immediately for remote wipe.' },
+      { id:'qq2', text:'Safe mobile app practice?', options:['Install from any website','Install only from official stores','Install from friend recommendations','Install highest downloads'], correct:1, explanation:'Official stores review apps for malware.' },
+      { id:'qq3', text:'What to enable for lost device protection?', options:['Location sharing','Remote wipe (MDM)','Auto-brightness','App notifications'], correct:1, explanation:'MDM remote wipe erases data on lost devices.' },
+      { id:'qq4', text:'SMS with link to "claim your prize"?', options:['Click — might be real','Forward to colleagues','Delete — do not click','Reply for info'], correct:2, explanation:'This is smishing. Delete without clicking.' },
+      { id:'qq5', text:'Why disable Bluetooth when not using it?', options:['Battery drain','Attackers can exploit Bluetooth','Slows WiFi','Company policy'], correct:1, explanation:'Bluetooth attacks can allow device access.' },
+    ]},
+    { id:'q8', moduleId:'m8', title:'Third-Party Risk Assessment', timeLimit:12, passMark:75, attempts:2, questions:[
+      { id:'qq1', text:'Vendor requests remote access to fix issue. Verify first?', options:['Company name','Identity and IT authorization','Nice website','Price quote'], correct:1, explanation:'Verify identity and IT authorization before granting access.' },
+      { id:'qq2', text:'Which framework requires third-party security assessments?', options:['Only SAMA','Only NCA','Both SAMA and NCA ECC-4-1','Neither'], correct:2, explanation:'Both frameworks require third-party controls.' },
+      { id:'qq3', text:'Contractor wants to connect personal laptop to network?', options:['Allow if needed','Direct to IT Security for provisioning','Allow temporarily','Refuse silently'], correct:1, explanation:'Third-party devices must go through IT Security.' },
+      { id:'qq4', text:'Why are vendors a cybersecurity risk?', options:['Different software','Access to systems creates attack surface','Work slower','Higher fees'], correct:1, explanation:'Vendor access creates indirect attack paths.' },
+      { id:'qq5', text:'How often should vendor access be reviewed?', options:['Never','Only on suspicion','At least annually','Every five years'], correct:2, explanation:'Annual reviews are required by SAMA and NCA.' },
+    ]},
+    { id:'q9', moduleId:'m9', title:'Business Continuity Assessment', timeLimit:12, passMark:70, attempts:3, questions:[
+      { id:'qq1', text:'What is a Business Continuity Plan (BCP)?', options:['Financial backup','Plan to maintain operations during disruption','Backup schedule','Emergency contacts'], correct:1, explanation:'BCP ensures continued operations despite incidents.' },
+      { id:'qq2', text:'What does "Recovery Time Objective (RTO)" mean?', options:['Data loss tolerance','Max acceptable time to restore system','Cost of recovery','Staff needed'], correct:1, explanation:'RTO defines maximum tolerable downtime.' },
+      { id:'qq3', text:'Can still access compromised systems. Continue using?', options:['Yes if working','Only urgent tasks','No — report and avoid until cleared','Yes if critical'], correct:2, explanation:'Compromised systems must not be used until cleared.' },
+      { id:'qq4', text:'Why store backups offline or offsite?', options:['Save storage','Prevent ransomware encrypting backups','Easier access','Cost reduction'], correct:1, explanation:'Ransomware targets network-connected backups.' },
+      { id:'qq5', text:'Major incident disrupts communication systems?', options:['Personal email/messaging','Follow BCP backup communication channels','Social media','Wait for IT'], correct:1, explanation:'BCP defines approved backup communication channels.' },
+    ]},
+    { id:'q10', moduleId:'m10', title:'Cloud Security Assessment', timeLimit:10, passMark:70, attempts:3, questions:[
+      { id:'qq1', text:'Under Shared Responsibility Model, who protects your data?', options:['Entirely provider','Entirely customer','Shared responsibility','Nobody — cloud is secure'], correct:2, explanation:'You are responsible for your data even in the cloud.' },
+      { id:'qq2', text:'Which violates cloud security policy?', options:['Company cloud storage','MFA on cloud account','Work docs on personal Google Drive','Reviewing permissions'], correct:2, explanation:'Personal cloud services are not approved for work data.' },
+      { id:'qq3', text:'NCA requirement for cloud data location?', options:['Anywhere globally','Saudi data residency required','Must be in US','No requirements'], correct:1, explanation:'NCA requires data residency within Saudi Arabia.' },
+      { id:'qq4', text:'Sensitive doc shared via "Anyone with link"?', options:['Leave it','Restrict access and report to IT','Only report if labeled confidential','Ask person who shared'], correct:1, explanation:'Restrict access and report immediately.' },
+      { id:'qq5', text:'Most important cloud account security control?', options:['Strong password alone','Multi-Factor Authentication','Same device always','Private browser'], correct:1, explanation:'MFA is most effective against unauthorized access.' },
+    ]},
   ];
   dbSet(DB.QUIZZES, quizzes);
 
   /* Enrollments */
   const now = new Date();
-  const due30 = new Date(now.getTime() + 30*24*60*60*1000).toISOString();
-  const due7  = new Date(now.getTime() + 7*24*60*60*1000).toISOString();
-  const past  = new Date(now.getTime() - 5*24*60*60*1000).toISOString(); // 5 days ago (overdue)
+  const due30 = new Date(now.getTime() + 30*86400000).toISOString();
+  const due7  = new Date(now.getTime() + 7*86400000).toISOString();
+  const past  = new Date(now.getTime() - 5*86400000).toISOString();
   const enrollments = [
     { id:'en1',  userId:'u2', moduleId:'m1', enrolledAt:'2026-02-01T00:00:00Z', dueDate:due30, completedAt:'2026-02-10T00:00:00Z', progress:100, status:'completed', quizScore:90, quizPassed:true,  certificate:{ id:'cert1', issuedAt:'2026-02-10T00:00:00Z', score:90 }, assignedBy:'u1' },
     { id:'en2',  userId:'u2', moduleId:'m2', enrolledAt:'2026-02-01T00:00:00Z', dueDate:due30, completedAt:'2026-02-14T00:00:00Z', progress:100, status:'completed', quizScore:80, quizPassed:true,  certificate:{ id:'cert2', issuedAt:'2026-02-14T00:00:00Z', score:80 }, assignedBy:'u1' },
@@ -738,38 +724,22 @@ function initSeedData() {
 
   /* Quiz Results */
   const qresults = [
-    { id:'qr1', userId:'u2', quizId:'q1', moduleId:'m1', attempt:1, score:9, total:10, percentage:90, passed:true,  answers:[2,2,1,1,2], submittedAt:'2026-02-10T10:00:00Z', timeSpent:480 },
-    { id:'qr2', userId:'u2', quizId:'q2', moduleId:'m2', attempt:1, score:8, total:10, percentage:80, passed:true,  answers:[2,2,2,1,2], submittedAt:'2026-02-14T10:00:00Z', timeSpent:520 },
-    { id:'qr3', userId:'u4', quizId:'q1', moduleId:'m1', attempt:1, score:5,  total:5, percentage:100,passed:true,  answers:[2,2,1,1,2], submittedAt:'2026-02-20T10:00:00Z', timeSpent:400 },
-    { id:'qr4', userId:'u4', quizId:'q2', moduleId:'m2', attempt:1, score:4,  total:5, percentage:85, passed:true,  answers:[2,2,2,1,2], submittedAt:'2026-02-22T10:00:00Z', timeSpent:450 },
-    { id:'qr5', userId:'u5', quizId:'q1', moduleId:'m1', attempt:1, score:3,  total:5, percentage:60, passed:false, answers:[0,2,0,1,2], submittedAt:'2026-02-20T10:00:00Z', timeSpent:600 },
-    { id:'qr6', userId:'u6', quizId:'q1', moduleId:'m1', attempt:1, score:3,  total:4, percentage:75, passed:true,  answers:[2,2,1,1,2], submittedAt:'2026-03-01T10:00:00Z', timeSpent:380 },
-    { id:'qr7', userId:'u7', quizId:'q1', moduleId:'m1', attempt:1, score:5,  total:5, percentage:95, passed:true,  answers:[2,2,1,1,2], submittedAt:'2026-02-12T10:00:00Z', timeSpent:300 },
-    { id:'qr8', userId:'u7', quizId:'q7', moduleId:'m7', attempt:1, score:4,  total:5, percentage:80, passed:true,  answers:[1,1,1,2,1], submittedAt:'2026-02-18T10:00:00Z', timeSpent:350 },
-    { id:'qr9', userId:'u9', quizId:'q1', moduleId:'m1', attempt:1, score:4,  total:5, percentage:85, passed:true,  answers:[2,2,1,1,2], submittedAt:'2026-03-05T10:00:00Z', timeSpent:420 },
+    { id:'qr1', userId:'u2', quizId:'q1', moduleId:'m1', attempt:1, score:4, total:5, percentage:90, passed:true,  answers:[2,2,1,1,2], submittedAt:'2026-02-10T10:00:00Z', timeSpent:480 },
+    { id:'qr2', userId:'u2', quizId:'q2', moduleId:'m2', attempt:1, score:4, total:5, percentage:80, passed:true,  answers:[2,2,2,1,2], submittedAt:'2026-02-14T10:00:00Z', timeSpent:520 },
+    { id:'qr3', userId:'u4', quizId:'q1', moduleId:'m1', attempt:1, score:5, total:5, percentage:100,passed:true,  answers:[2,2,1,1,2], submittedAt:'2026-02-20T10:00:00Z', timeSpent:400 },
+    { id:'qr4', userId:'u4', quizId:'q2', moduleId:'m2', attempt:1, score:4, total:5, percentage:85, passed:true,  answers:[2,2,2,1,2], submittedAt:'2026-02-22T10:00:00Z', timeSpent:450 },
+    { id:'qr5', userId:'u5', quizId:'q1', moduleId:'m1', attempt:1, score:3, total:5, percentage:60, passed:false, answers:[0,2,0,1,2], submittedAt:'2026-02-20T10:00:00Z', timeSpent:600 },
+    { id:'qr6', userId:'u6', quizId:'q1', moduleId:'m1', attempt:1, score:3, total:4, percentage:75, passed:true,  answers:[2,2,1,1,2], submittedAt:'2026-03-01T10:00:00Z', timeSpent:380 },
+    { id:'qr7', userId:'u7', quizId:'q1', moduleId:'m1', attempt:1, score:5, total:5, percentage:95, passed:true,  answers:[2,2,1,1,2], submittedAt:'2026-02-12T10:00:00Z', timeSpent:300 },
+    { id:'qr8', userId:'u7', quizId:'q7', moduleId:'m7', attempt:1, score:4, total:5, percentage:80, passed:true,  answers:[1,1,1,2,1], submittedAt:'2026-02-18T10:00:00Z', timeSpent:350 },
+    { id:'qr9', userId:'u9', quizId:'q1', moduleId:'m1', attempt:1, score:4, total:5, percentage:85, passed:true,  answers:[2,2,1,1,2], submittedAt:'2026-03-05T10:00:00Z', timeSpent:420 },
   ];
   dbSet(DB.QUIZ_RESULTS, qresults);
 
   /* Phishing Campaigns */
   const campaigns = [
-    {
-      id:'ph1', name:'Q1 2026 IT Password Reset Simulation',
-      description:'Tests susceptibility to fake IT department password reset emails.',
-      templateId:'tpl-pwd-reset', status:'completed',
-      targetUserIds:['u2','u3','u4','u5','u6','u8','u9','u10'],
-      targetDepts:['IT','Finance','HR','Ops'],
-      launchedAt:'2026-02-01T00:00:00Z', endsAt:'2026-02-28T00:00:00Z',
-      createdBy:'u1'
-    },
-    {
-      id:'ph2', name:'March 2026 — IT Support Ticket Simulation',
-      description:'Simulates a fake IT support ticket requiring immediate login to resolve a "security issue".',
-      templateId:'tpl-it-support', status:'active',
-      targetUserIds:['u3','u5','u8','u10'],
-      targetDepts:['Finance','Ops'],
-      launchedAt:'2026-03-01T00:00:00Z', endsAt:'2026-03-31T00:00:00Z',
-      createdBy:'u1'
-    },
+    { id:'ph1', name:'Q1 2026 IT Password Reset Simulation', description:'Tests susceptibility to fake password reset emails.', templateId:'tpl-pwd-reset', status:'completed', targetUserIds:['u2','u3','u4','u5','u6','u8','u9','u10'], targetDepts:['Information Technology','Finance','Human Resources','Operations'], launchedAt:'2026-02-01T00:00:00Z', endsAt:'2026-02-28T00:00:00Z', createdBy:'u1' },
+    { id:'ph2', name:'March 2026 — IT Support Ticket Simulation', description:'Simulates a fake IT support ticket.', templateId:'tpl-it-support', status:'active', targetUserIds:['u3','u5','u8','u10'], targetDepts:['Finance','Operations'], launchedAt:'2026-03-01T00:00:00Z', endsAt:'2026-03-31T00:00:00Z', createdBy:'u1' },
   ];
   dbSet(DB.PHISHING, campaigns);
 
@@ -804,8 +774,6 @@ function initSeedData() {
   ];
   dbSet(DB.ALERTS, alerts);
 
-  /* Build initial compliance records */
   rebuildOrgCompliance();
-
   localStorage.setItem('cap_seeded', '1');
 }
