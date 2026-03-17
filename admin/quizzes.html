@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quizzes & Assessments — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title">Quizzes & Assessments</span></div>
+      <div class="header-right">
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+
+      <div class="section-header">
+        <h3 class="section-title">All Quizzes</h3>
+        <button class="btn btn-primary" onclick="openQuizBuilder()">+ Build Quiz</button>
+      </div>
+
+      <div class="card">
+        <div class="table-wrapper"><table>
+          <thead><tr><th>Quiz Title</th><th>Module</th><th>Questions</th><th>Time Limit</th><th>Pass Mark</th><th>Avg Score</th><th>Attempts</th><th>Actions</th></tr></thead>
+          <tbody id="quiz-tbody"></tbody>
+        </table></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- Quiz Builder Modal -->
+<div class="modal-backdrop" id="quiz-modal">
+  <div class="modal modal-xl">
+    <div class="modal-header"><h3 id="qm-title">Build Quiz</h3><button class="modal-close" onclick="closeModal('quiz-modal')">✕</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="qm-id">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Quiz Title *</label><input id="qm-quiz-title" class="form-control" placeholder="Password Security Assessment"></div>
+        <div class="form-group"><label class="form-label">Linked Module</label>
+          <select id="qm-module" class="form-control"><option value="">— No Module —</option></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Time Limit (min)</label><input id="qm-time" class="form-control" type="number" value="10" min="1" max="60"></div>
+        <div class="form-group"><label class="form-label">Pass Mark (%)</label><input id="qm-pass" class="form-control" type="number" value="70" min="50" max="100"></div>
+        <div class="form-group"><label class="form-label">Max Attempts</label><input id="qm-attempts" class="form-control" type="number" value="3" min="1" max="10"></div>
+      </div>
+
+      <div class="section-header mt-6">
+        <h4>Questions</h4>
+        <button type="button" class="btn btn-outline btn-sm" onclick="addQuestion()">+ Add Question</button>
+      </div>
+      <div id="questions-builder"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('quiz-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveQuiz()">Save Quiz</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script>
+const user = initPage('admin');
+let questions = [];
+if (user) renderPage();
+
+function renderPage() {
+  renderQuizTable();
+  populateModuleDropdown();
+}
+
+function renderQuizTable() {
+  const quizzes = dbGet(DB.QUIZZES);
+  const tbody   = document.getElementById('quiz-tbody');
+  if (!quizzes.length) { tbody.innerHTML='<tr><td colspan="8"><div class="empty-state" style="padding:24px"><div class="empty-state-icon">❓</div><h3>No quizzes yet</h3></div></td></tr>'; return; }
+  tbody.innerHTML = quizzes.map(q => {
+    const mod     = q.moduleId ? dbGetOne(DB.MODULES, q.moduleId) : null;
+    const results = dbGet(DB.QUIZ_RESULTS).filter(r => r.quizId === q.id);
+    const avg     = results.length ? Math.round(results.reduce((s,r)=>s+r.percentage,0)/results.length) : null;
+    return `<tr>
+      <td><strong>${escHtml(q.title)}</strong></td>
+      <td>${mod ? `<span class="badge badge-info">${truncate(mod.title,30)}</span>` : '<span class="text-muted">—</span>'}</td>
+      <td><span class="badge badge-gray">${q.questions?q.questions.length:0}</span></td>
+      <td>⏱ ${q.timeLimit} min</td>
+      <td>${complianceBadge(q.passMark)}</td>
+      <td>${avg!==null?`<strong>${avg}%</strong>`:'<span class="text-muted">No attempts</span>'}</td>
+      <td>${results.length}</td>
+      <td><div class="actions-cell">
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="editQuiz('${q.id}')" title="Edit">✏️</button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="deleteQuiz('${q.id}')" title="Delete">🗑️</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function populateModuleDropdown() {
+  const sel = document.getElementById('qm-module');
+  const mods = dbGet(DB.MODULES);
+  sel.innerHTML = '<option value="">— No Module —</option>';
+  mods.forEach(m => { const o=document.createElement('option'); o.value=m.id; o.textContent=m.title; sel.appendChild(o); });
+}
+
+function openQuizBuilder() {
+  questions = [{ id:genId('qq'), text:'', options:['','','',''], correct:0, explanation:'' }];
+  document.getElementById('qm-id').value='';
+  document.getElementById('qm-quiz-title').value='';
+  document.getElementById('qm-module').value='';
+  document.getElementById('qm-time').value='10';
+  document.getElementById('qm-pass').value='70';
+  document.getElementById('qm-attempts').value='3';
+  document.getElementById('qm-title').textContent='Build Quiz';
+  renderQuestionsBuilder();
+  openModal('quiz-modal');
+}
+
+function editQuiz(id) {
+  const q = dbGetOne(DB.QUIZZES, id);
+  if (!q) return;
+  document.getElementById('qm-id').value='';  // will be set
+  document.getElementById('qm-id').value=q.id;
+  document.getElementById('qm-quiz-title').value=q.title;
+  document.getElementById('qm-module').value=q.moduleId||'';
+  document.getElementById('qm-time').value=q.timeLimit||10;
+  document.getElementById('qm-pass').value=q.passMark||70;
+  document.getElementById('qm-attempts').value=q.attempts||3;
+  questions = JSON.parse(JSON.stringify(q.questions||[]));
+  document.getElementById('qm-title').textContent='Edit Quiz';
+  renderQuestionsBuilder();
+  openModal('quiz-modal');
+}
+
+function renderQuestionsBuilder() {
+  const container = document.getElementById('questions-builder');
+  container.innerHTML = questions.map((q,qi) => `
+    <div class="card mb-4" style="border:1px solid var(--gray-200)">
+      <div class="card-header">
+        <strong>Question ${qi+1}</strong>
+        <button type="button" class="btn btn-danger btn-sm btn-icon" onclick="removeQuestion(${qi})">✕</button>
+      </div>
+      <div class="card-body">
+        <div class="form-group"><label class="form-label">Question Text *</label>
+          <input class="form-control" value="${escHtml(q.text)}" onchange="questions[${qi}].text=this.value" placeholder="What is…?">
+        </div>
+        <label class="form-label">Answer Options (select the correct one)</label>
+        ${q.options.map((opt,oi) => `
+          <div class="flex items-center gap-3 mb-2">
+            <input type="radio" name="correct-${qi}" value="${oi}" ${q.correct===oi?'checked':''} onchange="questions[${qi}].correct=${oi}" style="accent-color:var(--primary)">
+            <input class="form-control" value="${escHtml(opt)}" onchange="questions[${qi}].options[${oi}]=this.value" placeholder="Option ${String.fromCharCode(65+oi)}">
+          </div>`).join('')}
+        <div class="form-group mt-3"><label class="form-label">Explanation (shown after answer)</label>
+          <input class="form-control" value="${escHtml(q.explanation||'')}" onchange="questions[${qi}].explanation=this.value" placeholder="Why this answer is correct…">
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function addQuestion() {
+  questions.push({ id:genId('qq'), text:'', options:['','','',''], correct:0, explanation:'' });
+  renderQuestionsBuilder();
+}
+
+function removeQuestion(idx) {
+  if (questions.length<=1) { showToast('A quiz must have at least one question','error'); return; }
+  questions.splice(idx,1);
+  renderQuestionsBuilder();
+}
+
+function saveQuiz() {
+  const id    = document.getElementById('qm-id').value;
+  const title = document.getElementById('qm-quiz-title').value.trim();
+  if (!title) { showToast('Quiz title is required','error'); return; }
+  if (questions.some(q=>!q.text.trim()||q.options.some(o=>!o.trim()))) { showToast('All question texts and options must be filled','error'); return; }
+  const q = {
+    id: id||genId('q'),
+    moduleId:  document.getElementById('qm-module').value||null,
+    title,
+    timeLimit: parseInt(document.getElementById('qm-time').value)||10,
+    passMark:  parseInt(document.getElementById('qm-pass').value)||70,
+    attempts:  parseInt(document.getElementById('qm-attempts').value)||3,
+    questions,
+  };
+  dbSave(DB.QUIZZES, q);
+  closeModal('quiz-modal');
+  renderQuizTable();
+  showToast(id?'Quiz updated':'Quiz created','success');
+}
+
+function deleteQuiz(id) {
+  showConfirm('Delete this quiz? All results will also be removed.', () => {
+    dbDelete(DB.QUIZZES, id);
+    dbSet(DB.QUIZ_RESULTS, dbGet(DB.QUIZ_RESULTS).filter(r=>r.quizId!==id));
+    renderQuizTable();
+    showToast('Quiz deleted','warning');
+  }, 'Delete Quiz');
+}
+</script>
+</body>
+</html>

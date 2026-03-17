@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Training Modules — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title">Training Modules</span></div>
+      <div class="header-right">
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+
+      <div class="section-header">
+        <h3 class="section-title">All Training Modules</h3>
+        <div class="filter-bar">
+          <div class="input-group"><span class="input-icon">🔍</span><input id="mod-search" class="form-control" placeholder="Search modules…" style="width:200px"></div>
+          <select id="fw-filter" class="form-control" style="width:140px" onchange="renderModules()">
+            <option value="">All Frameworks</option>
+            <option value="NCA-ECC">NCA</option>
+            <option value="SAMA">SAMA</option>
+            <option value="CST">CST</option>
+          </select>
+          <select id="diff-filter" class="form-control" style="width:140px" onchange="renderModules()">
+            <option value="">All Difficulties</option>
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+          </select>
+          <button class="btn btn-primary" onclick="openAddModule()">+ New Module</button>
+        </div>
+      </div>
+
+      <div class="module-grid" id="modules-grid"></div>
+
+    </main>
+  </div>
+</div>
+
+<!-- Module Modal -->
+<div class="modal-backdrop" id="module-modal">
+  <div class="modal modal-xl">
+    <div class="modal-header"><h3 id="mod-modal-title">Add Training Module</h3><button class="modal-close" onclick="closeModal('module-modal')">✕</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="m-id">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Module Title *</label><input id="m-title" class="form-control" placeholder="Password Security Fundamentals" required></div>
+        <div class="form-group"><label class="form-label">Category *</label>
+          <select id="m-category" class="form-control">
+            <option value="access-control">Access Control</option>
+            <option value="threats">Threats & Attacks</option>
+            <option value="data-protection">Data Protection</option>
+            <option value="incident-response">Incident Response</option>
+            <option value="remote-work">Remote Work</option>
+            <option value="endpoint-security">Endpoint Security</option>
+            <option value="cloud-security">Cloud Security</option>
+            <option value="third-party">Third-Party Risk</option>
+            <option value="resilience">Resilience & BCM</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label class="form-label">Description *</label><textarea id="m-desc" class="form-control" rows="2" placeholder="Brief description of this module…"></textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Difficulty</label>
+          <select id="m-diff" class="form-control">
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Duration</label><input id="m-dur" class="form-control" placeholder="20 min"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Content Type</label>
+          <select id="m-type" class="form-control" onchange="toggleContentType()">
+            <option value="text">Text / Rich Content</option>
+            <option value="video">Video (YouTube)</option>
+            <option value="pdf">PDF Document</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Pass Mark (%)</label><input id="m-pass" class="form-control" type="number" min="50" max="100" value="70"></div>
+      </div>
+      <div id="content-text-group" class="form-group">
+        <label class="form-label">Module Content (HTML allowed)</label>
+        <textarea id="m-content-text" class="form-control" rows="6" placeholder="<h3>Title</h3><p>Content here…</p>"></textarea>
+      </div>
+      <div id="content-video-group" class="form-group" style="display:none">
+        <label class="form-label">YouTube Embed URL</label>
+        <input id="m-content-video" class="form-control" placeholder="https://youtube.com/embed/VIDEO_ID">
+      </div>
+      <div id="content-pdf-group" class="form-group" style="display:none">
+        <label class="form-label">PDF URL</label>
+        <input id="m-content-pdf" class="form-control" placeholder="https://example.com/document.pdf">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Icon / Emoji</label>
+        <input id="m-icon" class="form-control" placeholder="📚" maxlength="4" style="width:80px">
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-check"><input type="checkbox" id="m-mandatory"><span>Mandatory for all employees</span></label></div>
+        <div class="form-group"><label class="form-label">Status</label>
+          <select id="m-status" class="form-control"><option value="published">Published</option><option value="draft">Draft</option></select>
+        </div>
+      </div>
+      <div class="alert alert-info" style="margin-top:8px">
+        <span>ℹ️</span><span>Framework control mappings are auto-assigned based on category. You can manage them from the Compliance Matrix page.</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('module-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveModule()">Save Module</button>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
+<script src="../assets/js/graph.js"></script>
+<script>
+const user = initPage('admin');
+if (user) renderPage();
+
+const CATEGORY_COLORS = {
+  'access-control':'linear-gradient(135deg,#0ea5e9,#0369a1)',
+  'threats':'linear-gradient(135deg,#ef4444,#b91c1c)',
+  'data-protection':'linear-gradient(135deg,#8b5cf6,#6d28d9)',
+  'incident-response':'linear-gradient(135deg,#f97316,#c2410c)',
+  'remote-work':'linear-gradient(135deg,#14b8a6,#0f766e)',
+  'endpoint-security':'linear-gradient(135deg,#6366f1,#4338ca)',
+  'cloud-security':'linear-gradient(135deg,#22c55e,#15803d)',
+  'third-party':'linear-gradient(135deg,#f59e0b,#b45309)',
+  'resilience':'linear-gradient(135deg,#0284c7,#075985)',
+};
+
+function renderPage() {
+  renderModules();
+  document.getElementById('mod-search').addEventListener('input', renderModules);
+}
+
+function renderModules() {
+  const q     = document.getElementById('mod-search').value.toLowerCase();
+  const fw    = document.getElementById('fw-filter').value;
+  const diff  = document.getElementById('diff-filter').value;
+  let mods = dbGet(DB.MODULES);
+  if (q)    mods = mods.filter(m => (m.title+m.description+m.category).toLowerCase().includes(q));
+  if (fw)   mods = mods.filter(m => m.frameworkControls && m.frameworkControls.some(fc => fc.framework === fw));
+  if (diff) mods = mods.filter(m => m.difficulty === diff);
+  const grid = document.getElementById('modules-grid');
+  if (!mods.length) { grid.innerHTML='<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">📚</div><h3>No modules found</h3></div>'; return; }
+  grid.innerHTML = mods.map(m => {
+    const enrollCount = getModuleEnrollments(m.id).length;
+    const fwCodes = [...new Set((m.frameworkControls||[]).map(fc=>fc.framework))];
+    const bg = m.thumbColor || CATEGORY_COLORS[m.category] || 'linear-gradient(135deg,#374151,#1f2937)';
+    return `<div class="module-card">
+      <div class="module-thumb" style="background:${bg}">${m.icon||'📚'}</div>
+      <div class="module-body">
+        <div class="module-title">${escHtml(m.title)}</div>
+        <div class="module-meta">
+          ${difficultyBadge(m.difficulty)}
+          <span class="badge badge-gray">⏱ ${m.duration||'—'}</span>
+          ${m.mandatory?'<span class="badge badge-danger">Mandatory</span>':''}
+        </div>
+        <div class="module-fw-chips">${fwCodes.map(frameworkBadge).join('')}</div>
+        <p class="text-xs text-muted">${truncate(m.description,80)}</p>
+        <div class="module-actions">
+          <span class="text-xs text-muted">👥 ${enrollCount} enrolled</span>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            ${statusBadge(m.status||'draft')}
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="editModule('${m.id}')" title="Edit">✏️</button>
+            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteModule('${m.id}')" title="Delete">🗑️</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleContentType() {
+  const type = document.getElementById('m-type').value;
+  document.getElementById('content-text-group').style.display  = type==='text'  ? '' : 'none';
+  document.getElementById('content-video-group').style.display = type==='video' ? '' : 'none';
+  document.getElementById('content-pdf-group').style.display   = type==='pdf'   ? '' : 'none';
+}
+
+function openAddModule() {
+  ['m-id','m-title','m-desc','m-dur','m-content-text','m-content-video','m-content-pdf'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  document.getElementById('m-diff').value='beginner';
+  document.getElementById('m-pass').value='70';
+  document.getElementById('m-type').value='text';
+  document.getElementById('m-status').value='published';
+  document.getElementById('m-mandatory').checked=false;
+  document.getElementById('m-icon').value='📚';
+  document.getElementById('mod-modal-title').textContent='Add Training Module';
+  toggleContentType();
+  openModal('module-modal');
+}
+
+function editModule(id) {
+  const m = dbGetOne(DB.MODULES, id);
+  if (!m) return;
+  document.getElementById('m-id').value       = m.id;
+  document.getElementById('m-title').value    = m.title;
+  document.getElementById('m-desc').value     = m.description;
+  document.getElementById('m-category').value = m.category;
+  document.getElementById('m-diff').value     = m.difficulty;
+  document.getElementById('m-dur').value      = m.duration||'';
+  document.getElementById('m-type').value     = m.type||'text';
+  document.getElementById('m-pass').value     = m.passMark||70;
+  document.getElementById('m-status').value   = m.status||'draft';
+  document.getElementById('m-mandatory').checked = !!m.mandatory;
+  document.getElementById('m-icon').value     = m.icon||'📚';
+  document.getElementById('m-content-text').value  = (m.content||{}).richText||'';
+  document.getElementById('m-content-video').value = (m.content||{}).videoUrl||'';
+  document.getElementById('m-content-pdf').value   = (m.content||{}).pdfUrl||'';
+  document.getElementById('mod-modal-title').textContent='Edit Training Module';
+  toggleContentType();
+  openModal('module-modal');
+}
+
+function saveModule() {
+  const id    = document.getElementById('m-id').value;
+  const title = document.getElementById('m-title').value.trim();
+  if (!title) { showToast('Module title is required','error'); return; }
+  const type  = document.getElementById('m-type').value;
+  const existing = id ? dbGetOne(DB.MODULES, id) : null;
+  const bg = CATEGORY_COLORS[document.getElementById('m-category').value] || 'linear-gradient(135deg,#374151,#1f2937)';
+  const m = {
+    id: id||genId('m'),
+    title,
+    description: document.getElementById('m-desc').value.trim(),
+    category:    document.getElementById('m-category').value,
+    type,
+    difficulty:  document.getElementById('m-diff').value,
+    duration:    document.getElementById('m-dur').value.trim(),
+    icon:        document.getElementById('m-icon').value.trim()||'📚',
+    thumbColor:  bg,
+    content: {
+      richText: type==='text'  ? document.getElementById('m-content-text').value  : null,
+      videoUrl: type==='video' ? document.getElementById('m-content-video').value : null,
+      pdfUrl:   type==='pdf'   ? document.getElementById('m-content-pdf').value   : null,
+    },
+    frameworkControls: existing ? existing.frameworkControls : [],
+    passMark:    parseInt(document.getElementById('m-pass').value)||70,
+    quizId:      existing ? existing.quizId : null,
+    mandatory:   document.getElementById('m-mandatory').checked,
+    targetRoles: ['employee'],
+    targetDepts: [],
+    createdAt:   existing ? existing.createdAt : new Date().toISOString(),
+    createdBy:   user.id,
+    status:      document.getElementById('m-status').value,
+  };
+  dbSave(DB.MODULES, m);
+
+  // Auto-enroll & notify employees when new module is published
+  if (!id && m.status === 'published') {
+    const settings  = JSON.parse(localStorage.getItem('cap_settings') || '{}');
+    const autoEnroll = settings.autoEnroll !== false;
+    const dueDays   = parseInt(settings.dueDays || 30);
+    const dueDate   = new Date(Date.now() + dueDays * 86400000).toISOString();
+    const employees = getUsersByRole('employee').filter(u => u.status === 'active');
+    let enrolled = 0;
+    employees.forEach(u => {
+      const deptMatch = !m.targetDepts.length || m.targetDepts.includes(u.department);
+      if ((m.mandatory || deptMatch) && !getEnrollment(u.id, m.id)) {
+        enrollUser(u.id, m.id, dueDate, user.id);
+        enrolled++;
+        if (autoEnroll) notifyEnrollment(u.id, m.id, dueDate).catch(() => {});
+      }
+    });
+    closeModal('module-modal');
+    renderModules();
+    if (enrolled > 0) showToast('Module created & ' + enrolled + ' employee(s) enrolled' + (isAzureConfigured() ? ' + notified by email' : ''), 'success');
+    else showToast('Module created', 'success');
+  } else {
+    closeModal('module-modal');
+    renderModules();
+    showToast(id ? 'Module updated' : 'Module created', 'success');
+  }
+}
+
+function deleteModule(id) {
+  showConfirm('Delete this training module? All enrollments will also be removed.', () => {
+    dbDelete(DB.MODULES, id);
+    dbSet(DB.ENROLLMENTS, dbGet(DB.ENROLLMENTS).filter(e => e.moduleId !== id));
+    renderModules();
+    showToast('Module deleted','warning');
+  }, 'Delete Module');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Compliance Matrix — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title">Compliance Matrix</span></div>
+      <div class="header-right">
+        <button class="btn btn-outline btn-sm" onclick="rebuildOrgCompliance();renderPage();showToast('Compliance data refreshed','success')">🔄 Refresh</button>
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+
+      <!-- Summary Cards -->
+      <div class="grid-3 mb-6" id="fw-summary-cards"></div>
+
+      <!-- Matrix Tabs -->
+      <div class="tabs mb-6" id="matrix-tabs">
+        <button class="tab-btn active" data-tab="nca-panel">🔵 NCA ECC</button>
+        <button class="tab-btn" data-tab="sama-panel">🟣 SAMA</button>
+        <button class="tab-btn" data-tab="cst-panel">🟠 CST</button>
+      </div>
+
+      <div id="nca-panel"  class="tab-panel active"></div>
+      <div id="sama-panel" class="tab-panel"></div>
+      <div id="cst-panel"  class="tab-panel"></div>
+
+      <!-- Legend -->
+      <div class="card mt-6">
+        <div class="card-body">
+          <div class="flex items-center gap-6 flex-wrap">
+            <strong class="text-sm">Legend:</strong>
+            <div class="flex items-center gap-2"><div style="width:20px;height:20px;background:#16a34a;border-radius:4px"></div><span class="text-sm">≥ 80% Compliant</span></div>
+            <div class="flex items-center gap-2"><div style="width:20px;height:20px;background:#22c55e;border-radius:4px"></div><span class="text-sm">60–79% Good</span></div>
+            <div class="flex items-center gap-2"><div style="width:20px;height:20px;background:#f59e0b;border-radius:4px"></div><span class="text-sm">40–59% Partial</span></div>
+            <div class="flex items-center gap-2"><div style="width:20px;height:20px;background:#f97316;border-radius:4px"></div><span class="text-sm">20–39% Low</span></div>
+            <div class="flex items-center gap-2"><div style="width:20px;height:20px;background:#ef4444;border-radius:4px"></div><span class="text-sm">&lt; 20% Critical</span></div>
+            <div class="flex items-center gap-2"><div style="width:20px;height:20px;background:#9ca3af;border-radius:4px"></div><span class="text-sm">Not Assessed</span></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- Drill-down Modal -->
+<div class="modal-backdrop" id="drill-modal">
+  <div class="modal modal-lg">
+    <div class="modal-header"><h3 id="drill-title">Control Detail</h3><button class="modal-close" onclick="closeModal('drill-modal')">✕</button></div>
+    <div class="modal-body" id="drill-body"></div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script>
+const user = initPage('admin');
+if (user) renderPage();
+
+function renderPage() {
+  renderSummaryCards();
+  renderMatrix('NCA-ECC','nca-panel');
+  renderMatrix('SAMA','sama-panel');
+  renderMatrix('CST','cst-panel');
+  initTabs('matrix-tabs');
+}
+
+function renderSummaryCards() {
+  const cards = [
+    { code:'NCA-ECC', label:'NCA ECC Compliance', icon:'🔵', badge:'badge-nca' },
+    { code:'SAMA',    label:'SAMA CSF Compliance', icon:'🟣', badge:'badge-sama' },
+    { code:'CST',     label:'CST Framework',       icon:'🟠', badge:'badge-cst' },
+  ];
+  document.getElementById('fw-summary-cards').innerHTML = cards.map(c => {
+    const pct = getOrgComplianceScore(c.code);
+    return `<div class="stat-card">
+      <div class="stat-icon" style="font-size:1.5rem;background:var(--gray-100)">${c.icon}</div>
+      <div class="stat-info flex-1">
+        <div class="stat-val">${pct}%</div>
+        <div class="stat-label">${c.label}</div>
+        <div class="mt-2">${progressBar(pct)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderMatrix(fwCode, panelId) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  const fw    = dbGet(DB.FRAMEWORKS).find(f => f.code === fwCode);
+  if (!fw)    { panel.innerHTML='<p class="text-muted">Framework not found.</p>'; return; }
+  const depts = dbGet(DB.DEPARTMENTS);
+  const records = dbGet(DB.COMPLIANCE).filter(c => c.framework === fwCode);
+
+  let html = '';
+  fw.domains.forEach(domain => {
+    html += `<div class="card mb-5">
+      <div class="card-header"><h4>📌 ${domain.name}</h4></div>
+      <div class="card-body" style="overflow-x:auto">
+        <table class="heatmap-table" style="width:100%;border-collapse:collapse">
+          <thead><tr>
+            <th style="text-align:left;padding:8px 12px;min-width:220px;background:var(--gray-50)">Control</th>
+            ${depts.map(d=>`<th style="background:var(--gray-50);padding:8px">${d.code}</th>`).join('')}
+            <th style="background:var(--gray-50);padding:8px">Overall</th>
+          </tr></thead>
+          <tbody>`;
+    domain.controls.forEach(ctrl => {
+      const overall = records.find(r => r.control===ctrl.id && r.department==='ALL');
+      const overallPct = overall ? overall.completionPct : 0;
+      html += `<tr>
+        <td style="padding:8px 12px;font-size:0.8rem">
+          <strong class="mono" style="font-size:0.75rem">${ctrl.id}</strong><br>
+          <span style="color:var(--gray-600)">${ctrl.name}</span>
+        </td>`;
+      depts.forEach(d => {
+        const rec = records.find(r => r.control===ctrl.id && r.department===d.name);
+        const pct = rec ? rec.completionPct : 0;
+        const color = heatmapColor(pct);
+        html += `<td style="text-align:center;padding:4px">
+          <div class="heatmap-cell" style="background:${color};margin:0 auto" onclick="showDrill('${fwCode}','${ctrl.id}','${d.name}','${ctrl.name}')" title="${ctrl.id} — ${d.name}: ${pct}%">${pct}%</div>
+        </td>`;
+      });
+      html += `<td style="text-align:center;padding:4px">
+        <div class="heatmap-cell" style="background:${heatmapColor(overallPct)};margin:0 auto;font-weight:800" title="Overall: ${overallPct}%">${overallPct}%</div>
+      </td></tr>`;
+    });
+    html += '</tbody></table></div></div>';
+  });
+  panel.innerHTML = html;
+}
+
+function showDrill(framework, controlId, dept, controlName) {
+  document.getElementById('drill-title').textContent = `${controlId} — ${controlName} (${dept})`;
+  const mods = dbGet(DB.MODULES).filter(m => m.frameworkControls && m.frameworkControls.some(fc=>fc.framework===framework&&fc.control===controlId));
+  const users = dept === 'ALL' ? getUsersByRole('employee') : getUsersByDept(dept);
+  let html = '';
+  if (mods.length) {
+    html += `<h4 class="mb-3">Mapped Training Modules</h4>`;
+    html += mods.map(m=>`<div class="flex items-center gap-3 mb-2 p-3" style="background:var(--gray-50);border-radius:var(--radius)"><span>${m.icon||'📚'}</span><strong class="text-sm">${m.title}</strong>${statusBadge(m.status)}</div>`).join('');
+  }
+  html += `<h4 class="mt-4 mb-3">Employee Completion (${dept})</h4>`;
+  html += '<div class="table-wrapper"><table><thead><tr><th>Employee</th><th>Department</th><th>Module Status</th></tr></thead><tbody>';
+  users.forEach(u => {
+    mods.forEach(m => {
+      const en = getEnrollment(u.id, m.id);
+      const st = en ? en.status : 'not-started';
+      html += `<tr><td>${avatarHtml(u,'sm')} <strong style="margin-left:8px">${u.name}</strong></td><td>${u.department}</td><td>${statusBadge(st)}</td></tr>`;
+    });
+  });
+  html += '</tbody></table></div>';
+  if (!mods.length && !users.length) html = '<div class="empty-state"><div class="empty-state-icon">🔍</div><h3>No data for this control</h3></div>';
+  document.getElementById('drill-body').innerHTML = html;
+  openModal('drill-modal');
+}
+</script>
+</body>
+</html>

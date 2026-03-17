@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azure Integration — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+  <!-- MSAL.js from Microsoft CDN -->
+  <script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title">Azure / Office 365 Integration</span></div>
+      <div class="header-right">
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+
+      <!-- Connection Status Banner -->
+      <div id="connection-banner" class="mb-5"></div>
+
+      <!-- Tabs -->
+      <div class="tabs mb-6" id="azure-tabs">
+        <button class="tab-btn active" data-tab="tab-config">⚙️ Configuration</button>
+        <button class="tab-btn" data-tab="tab-guide">📋 Setup Guide</button>
+        <button class="tab-btn" data-tab="tab-sync">👥 User Sync</button>
+        <button class="tab-btn" data-tab="tab-email">📧 Email Test</button>
+      </div>
+
+      <!-- ═══════════════════════════════ TAB: Configuration ═══ -->
+      <div id="tab-config" class="tab-panel active">
+        <div style="max-width:680px">
+          <div class="card mb-5">
+            <div class="card-header">
+              <h3>🔑 Azure App Registration Credentials</h3>
+              <div id="config-status-badge"></div>
+            </div>
+            <div class="card-body">
+              <div class="alert alert-info mb-4">
+                <span>ℹ️</span>
+                <span>You need to register an app in <strong>Microsoft Azure Portal</strong> (Entra ID) to enable this integration. See the <strong>Setup Guide</strong> tab for step-by-step instructions.</span>
+              </div>
+
+              <!-- Enable Toggle -->
+              <div class="toggle-row mb-4">
+                <div class="toggle-info"><h4>Enable Microsoft 365 Integration</h4><p>Turn on to enable SSO login, Azure AD sync, and email sending via Office 365</p></div>
+                <label class="toggle-switch"><input type="checkbox" id="az-enabled"><span class="toggle-slider"></span></label>
+              </div>
+              <hr style="border:none;border-top:1px solid var(--gray-100);margin-bottom:20px">
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label">Application (Client) ID *
+                    <span class="text-xs text-muted" style="font-weight:400"> — From Azure Portal → App registrations</span>
+                  </label>
+                  <input id="az-client-id" class="form-control mono" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="font-size:0.875rem">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Directory (Tenant) ID *
+                    <span class="text-xs text-muted" style="font-weight:400"> — Your Microsoft 365 tenant</span>
+                  </label>
+                  <input id="az-tenant-id" class="form-control mono" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style="font-size:0.875rem">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Redirect URI
+                  <span class="text-xs text-muted" style="font-weight:400"> — Must match exactly in Azure App Registration → Authentication</span>
+                </label>
+                <input id="az-redirect-uri" class="form-control mono" style="font-size:0.875rem">
+                <div class="form-hint">This is auto-detected. Copy this exact URL into your Azure App Registration.</div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label">Sender Display Name
+                    <span class="text-xs text-muted" style="font-weight:400"> — Shown in outgoing emails</span>
+                  </label>
+                  <input id="az-sender-name" class="form-control" placeholder="Smart Shield Cyber Security" value="Smart Shield Cyber Security">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Sender Email (Optional Override)
+                    <span class="text-xs text-muted" style="font-weight:400"> — Leave blank to use signed-in admin email</span>
+                  </label>
+                  <input id="az-sender-email" class="form-control" placeholder="noreply@company.sa" type="email">
+                </div>
+              </div>
+
+              <div class="flex gap-3 mt-2">
+                <button class="btn btn-primary" onclick="saveAzureSettings()">💾 Save Configuration</button>
+                <button class="btn btn-outline" onclick="testConnection()" id="test-btn">🔌 Test Connection</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Required Permissions Card -->
+          <div class="card">
+            <div class="card-header"><h3>🔐 Required API Permissions</h3></div>
+            <div class="card-body">
+              <p class="text-sm text-muted mb-4">Add these permissions in <strong>Azure Portal → App registrations → Your App → API permissions → Add a permission → Microsoft Graph → Delegated permissions</strong>:</p>
+              <div class="table-wrapper"><table>
+                <thead><tr><th>Permission</th><th>Type</th><th>Purpose</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">openid</td><td><span class="badge badge-info">Delegated</span></td><td>Basic authentication</td><td id="perm-openid">—</td></tr>
+                  <tr><td class="mono">profile</td><td><span class="badge badge-info">Delegated</span></td><td>Read user profile name</td><td>—</td></tr>
+                  <tr><td class="mono">email</td><td><span class="badge badge-info">Delegated</span></td><td>Read user email address</td><td>—</td></tr>
+                  <tr><td class="mono">User.Read</td><td><span class="badge badge-info">Delegated</span></td><td>Read signed-in user profile</td><td>—</td></tr>
+                  <tr><td class="mono">User.ReadBasic.All</td><td><span class="badge badge-info">Delegated</span></td><td>Read all users (for Azure AD sync)</td><td id="perm-users">—</td></tr>
+                  <tr><td class="mono">Mail.Send</td><td><span class="badge badge-info">Delegated</span></td><td>Send emails (phishing simulations & reminders)</td><td id="perm-mail">—</td></tr>
+                </tbody>
+              </table></div>
+              <div class="alert alert-warning mt-4">
+                <span>⚠️</span>
+                <span><strong>Admin Consent Required:</strong> For <code>User.ReadBasic.All</code>, your Azure AD Global Administrator must grant admin consent. Go to <strong>API permissions → Grant admin consent for [Your Org]</strong>.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════ TAB: Setup Guide ═══ -->
+      <div id="tab-guide" class="tab-panel">
+        <div class="card" style="max-width:760px">
+          <div class="card-header"><h3>📋 Step-by-Step Azure App Registration Guide</h3></div>
+          <div class="card-body">
+
+            <div class="mb-6">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0">1</div>
+                <h4>Go to Azure Portal</h4>
+              </div>
+              <div class="ml-6" style="margin-left:44px">
+                <p class="text-sm mb-2">Sign in to <a href="https://portal.azure.com" target="_blank" class="text-primary font-semibold">portal.azure.com</a> with your Microsoft 365 Global Administrator account.</p>
+                <p class="text-sm">Navigate to: <code class="mono" style="background:var(--gray-100);padding:2px 8px;border-radius:4px">Microsoft Entra ID (Azure Active Directory) → App registrations → New registration</code></p>
+              </div>
+            </div>
+
+            <div class="mb-6">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0">2</div>
+                <h4>Register the Application</h4>
+              </div>
+              <div style="margin-left:44px">
+                <div class="table-wrapper"><table>
+                  <thead><tr><th>Field</th><th>Value to Enter</th></tr></thead>
+                  <tbody>
+                    <tr><td><strong>Name</strong></td><td>SmartShield CyberAware</td></tr>
+                    <tr><td><strong>Supported account types</strong></td><td>Accounts in this organizational directory only (Single tenant)</td></tr>
+                    <tr><td><strong>Redirect URI</strong></td><td>Single-page application (SPA) → <code id="guide-redirect" class="mono" style="background:var(--gray-100);padding:2px 8px;border-radius:4px"></code></td></tr>
+                  </tbody>
+                </table></div>
+                <button class="btn btn-ghost btn-sm mt-2" onclick="copyRedirectUri()">📋 Copy Redirect URI</button>
+              </div>
+            </div>
+
+            <div class="mb-6">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0">3</div>
+                <h4>Copy Your IDs</h4>
+              </div>
+              <div style="margin-left:44px">
+                <p class="text-sm mb-2">After registration, on the Overview page, copy:</p>
+                <ul style="list-style-type:disc;margin-left:20px;line-height:2">
+                  <li class="text-sm"><strong>Application (client) ID</strong> → Paste in Configuration tab → Client ID field</li>
+                  <li class="text-sm"><strong>Directory (tenant) ID</strong> → Paste in Configuration tab → Tenant ID field</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="mb-6">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0">4</div>
+                <h4>Configure Authentication (MSAL Token Settings)</h4>
+              </div>
+              <div style="margin-left:44px">
+                <p class="text-sm mb-2">Go to <strong>Authentication</strong> tab in your App registration:</p>
+                <ul style="list-style-type:disc;margin-left:20px;line-height:2">
+                  <li class="text-sm">Under <strong>Single-page application</strong> — verify the redirect URI is added</li>
+                  <li class="text-sm">Enable <strong>Access tokens</strong> and <strong>ID tokens</strong> under Implicit grant</li>
+                  <li class="text-sm">Set <strong>Supported account types</strong> to your organization only</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="mb-6">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0">5</div>
+                <h4>Add API Permissions</h4>
+              </div>
+              <div style="margin-left:44px">
+                <p class="text-sm mb-2">Go to <strong>API permissions → Add a permission → Microsoft Graph → Delegated permissions</strong>. Add:</p>
+                <div style="background:var(--gray-50);padding:16px;border-radius:var(--radius);font-family:var(--font-mono);font-size:0.8rem;line-height:2">
+                  openid<br>profile<br>email<br>User.Read<br>User.ReadBasic.All<br>Mail.Send
+                </div>
+                <div class="alert alert-warning mt-3">
+                  <span>⚠️</span><span>Click <strong>"Grant admin consent for [Organization Name]"</strong> — required for <code>User.ReadBasic.All</code>.</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0">6</div>
+                <h4>Test the Connection</h4>
+              </div>
+              <div style="margin-left:44px">
+                <p class="text-sm">Return to the <strong>Configuration</strong> tab, enter your Client ID and Tenant ID, save, then click <strong>"Test Connection"</strong>. A Microsoft login popup will appear.</p>
+              </div>
+            </div>
+
+            <div class="alert alert-success">
+              <span>✅</span>
+              <span>Once connected, you can: <strong>Sign in with Microsoft</strong> on the login page · <strong>Sync users from Azure AD</strong> · <strong>Send phishing simulation emails</strong> · <strong>Send training reminders</strong> via Office 365.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════ TAB: User Sync ═══ -->
+      <div id="tab-sync" class="tab-panel">
+        <div class="card mb-5" style="max-width:680px">
+          <div class="card-header">
+            <h3>👥 Sync Users from Azure AD</h3>
+            <div id="sync-status-badge"></div>
+          </div>
+          <div class="card-body">
+            <p class="text-muted text-sm mb-4">Import employees directly from your Microsoft 365 / Azure Active Directory. New users are added to the platform; existing users (matched by email) are updated.</p>
+            <div id="az-signin-required" class="hidden">
+              <div class="alert alert-warning mb-4"><span>⚠️</span><span>You must sign in with Microsoft to sync users from Azure AD.</span></div>
+              <button class="btn btn-primary" onclick="signInForSync()">🔐 Sign in with Microsoft</button>
+            </div>
+            <div id="sync-controls">
+              <div class="flex gap-3 flex-wrap mb-4">
+                <button class="btn btn-primary" id="sync-btn" onclick="runUserSync()">🔄 Sync Users from Azure AD</button>
+                <button class="btn btn-ghost" onclick="checkSignInStatus()">🔍 Check Connection Status</button>
+              </div>
+              <div id="sync-progress-bar" class="hidden mb-4">
+                <div class="progress" style="height:12px">
+                  <div class="progress-bar" id="sync-bar-fill" style="width:0%"></div>
+                </div>
+                <div class="text-xs text-muted mt-2" id="sync-progress-text">Starting…</div>
+              </div>
+              <div id="sync-result" class="hidden"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="max-width:680px">
+          <div class="card-header"><h3>ℹ️ Sync Behavior</h3></div>
+          <div class="card-body">
+            <div class="table-wrapper"><table>
+              <thead><tr><th>Scenario</th><th>Action</th></tr></thead>
+              <tbody>
+                <tr><td>New user in Azure AD (not in platform)</td><td><span class="badge badge-success">✅ Created as Employee</span></td></tr>
+                <tr><td>Existing user matched by email</td><td><span class="badge badge-info">🔄 Updated (name, dept, title)</span></td></tr>
+                <tr><td>Disabled account in Azure AD</td><td><span class="badge badge-warning">⚠️ Marked Inactive</span></td></tr>
+                <tr><td>Service/system accounts (#EXT#)</td><td><span class="badge badge-gray">⏭ Skipped</span></td></tr>
+                <tr><td>Admin accounts</td><td><span class="badge badge-info">✅ Created (still as Employee role)</span></td></tr>
+              </tbody>
+            </table></div>
+            <div class="alert alert-info mt-4">
+              <span>ℹ️</span>
+              <span>Synced users are given a default password of <code class="mono">AzureAD_SSO</code>. They should log in using <strong>Sign in with Microsoft</strong> instead. Department groupings are automatically created based on Azure AD department attribute.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════ TAB: Email Test ═══ -->
+      <div id="tab-email" class="tab-panel">
+        <div class="card mb-5" style="max-width:680px">
+          <div class="card-header"><h3>📧 Test Email Sending</h3></div>
+          <div class="card-body">
+            <p class="text-muted text-sm mb-4">Send a test email to verify your Office 365 Mail.Send permission is working correctly.</p>
+            <div class="form-group"><label class="form-label">Recipient Email</label><input id="test-email-to" class="form-control" type="email" placeholder="recipient@company.sa"></div>
+            <div class="form-group"><label class="form-label">Email Template</label>
+              <select id="test-template" class="form-control">
+                <option value="reminder">Training Reminder</option>
+                <option value="phishing">Phishing Simulation (test)</option>
+                <option value="certificate">Certificate</option>
+              </select>
+            </div>
+            <div id="test-ms-signin-required" class="hidden mb-3">
+              <div class="alert alert-warning"><span>⚠️</span><span>Sign in with Microsoft first to send test emails.</span></div>
+            </div>
+            <button class="btn btn-primary" onclick="sendTestEmail()" id="test-email-btn">📤 Send Test Email</button>
+            <div id="test-email-result" class="mt-4"></div>
+          </div>
+        </div>
+
+        <div class="card" style="max-width:680px">
+          <div class="card-header"><h3>📬 Microsoft Sign-in Status</h3></div>
+          <div class="card-body" id="ms-signin-status"></div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script src="../assets/js/graph.js"></script>
+<script>
+const user = initPage('admin');
+if (user) renderPage();
+
+function renderPage() {
+  loadConfig();
+  renderConnectionBanner();
+  renderSigninStatus();
+  initTabs('azure-tabs');
+  document.getElementById('guide-redirect').textContent = window.location.origin + (window.location.pathname.includes('/Awareness') ? '/Awareness/' : '/');
+}
+
+function loadConfig() {
+  const cfg = getAzureConfig();
+  document.getElementById('az-enabled').checked    = cfg.enabled || false;
+  document.getElementById('az-client-id').value    = cfg.clientId || '';
+  document.getElementById('az-tenant-id').value    = cfg.tenantId === 'common' ? '' : (cfg.tenantId || '');
+  document.getElementById('az-redirect-uri').value = cfg.redirectUri || (window.location.origin + (window.location.pathname.includes('/Awareness') ? '/Awareness/' : '/'));
+  document.getElementById('az-sender-name').value  = cfg.senderName || 'Smart Shield Cyber Security';
+  document.getElementById('az-sender-email').value = cfg.senderEmail || '';
+  renderConfigBadge(cfg);
+}
+
+function renderConfigBadge(cfg) {
+  const el = document.getElementById('config-status-badge');
+  if (!el) return;
+  if (cfg.enabled && cfg.clientId && cfg.tenantId) {
+    el.innerHTML = '<span class="badge badge-success">✅ Configured</span>';
+  } else {
+    el.innerHTML = '<span class="badge badge-warning">⚠️ Not Configured</span>';
+  }
+}
+
+function renderConnectionBanner() {
+  const banner = document.getElementById('connection-banner');
+  const msSession = getMsSession();
+  const azCfg    = getAzureConfig();
+  if (!azCfg.enabled || !azCfg.clientId) {
+    banner.innerHTML = '<div class="alert alert-warning"><span>⚙️</span><span><strong>Azure integration is not configured.</strong> Enter your Client ID and Tenant ID in the Configuration tab to get started.</span></div>';
+  } else if (msSession && isMsSignedIn()) {
+    banner.innerHTML = `<div class="alert alert-success"><span>✅</span><span><strong>Connected to Microsoft 365</strong> as <strong>${msSession.name}</strong> (${msSession.email}). User sync and email sending are available.</span></div>`;
+  } else {
+    banner.innerHTML = `<div class="alert alert-info"><span>🔐</span><span><strong>Azure is configured but not signed in.</strong> <button class="btn btn-primary btn-sm" onclick="signInWithMicrosoft()" style="margin-left:12px">Sign in with Microsoft →</button></span></div>`;
+  }
+}
+
+function saveAzureSettings() {
+  const clientId    = document.getElementById('az-client-id').value.trim();
+  const tenantId    = document.getElementById('az-tenant-id').value.trim();
+  const redirectUri = document.getElementById('az-redirect-uri').value.trim();
+  const senderName  = document.getElementById('az-sender-name').value.trim();
+  const senderEmail = document.getElementById('az-sender-email').value.trim();
+  const enabled     = document.getElementById('az-enabled').checked;
+  if (enabled && (!clientId || !tenantId)) {
+    showToast('Client ID and Tenant ID are required when Azure is enabled', 'error');
+    return;
+  }
+  saveAzureConfig({ clientId, tenantId: tenantId||'common', redirectUri, senderName, senderEmail, enabled });
+  _msalInstance = null; // Reset MSAL instance
+  renderConfigBadge(getAzureConfig());
+  renderConnectionBanner();
+  showToast('Azure configuration saved!', 'success');
+}
+
+async function testConnection() {
+  if (!isAzureConfigured()) { showToast('Please save your Azure configuration first', 'error'); return; }
+  const btn = document.getElementById('test-btn');
+  btn.textContent = '⏳ Connecting…'; btn.disabled = true;
+  try {
+    const signInResult = await msSignIn('basic');
+    if (!signInResult) { btn.textContent='🔌 Test Connection'; btn.disabled=false; return; }
+    const profile = await testGraphConnection();
+    if (profile.ok) {
+      showToast(`✅ Connected as ${profile.user.displayName} (${profile.user.mail||profile.user.userPrincipalName})`, 'success', 5000);
+      renderConnectionBanner();
+      renderSigninStatus();
+      // Mark perms as verified
+      ['perm-openid','perm-users','perm-mail'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '<span class="badge badge-success">✅</span>';
+      });
+    } else {
+      showToast('Connection failed: ' + profile.error, 'error', 5000);
+    }
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error', 6000);
+  }
+  btn.textContent='🔌 Test Connection'; btn.disabled=false;
+}
+
+async function signInWithMicrosoft() {
+  if (!isAzureConfigured()) { showToast('Configure Azure settings first', 'error'); return; }
+  try {
+    const result = await msSignIn('full');
+    if (result) { showToast('Signed in as ' + result.account.name, 'success'); renderConnectionBanner(); renderSigninStatus(); }
+  } catch (err) { showToast('Sign-in failed: ' + err.message, 'error'); }
+}
+
+async function signInForSync() {
+  await signInWithMicrosoft();
+  checkSignInStatus();
+}
+
+function checkSignInStatus() {
+  const msSession = getMsSession();
+  if (msSession && isMsSignedIn()) {
+    document.getElementById('az-signin-required').classList.add('hidden');
+    document.getElementById('sync-controls').classList.remove('hidden');
+    showToast('Signed in as ' + msSession.name, 'success');
+  } else {
+    document.getElementById('az-signin-required').classList.remove('hidden');
+    document.getElementById('sync-controls').style.opacity = '0.5';
+  }
+  renderSigninStatus();
+}
+
+function renderSigninStatus() {
+  const cont = document.getElementById('ms-signin-status');
+  if (!cont) return;
+  const msSession = getMsSession();
+  if (msSession && isMsSignedIn()) {
+    cont.innerHTML = `
+      <div class="flex items-center gap-4">
+        <div style="width:48px;height:48px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:1.25rem;color:#fff;font-weight:700">${(msSession.name||'M')[0]}</div>
+        <div>
+          <div class="font-semibold">${msSession.name}</div>
+          <div class="text-sm text-muted">${msSession.email}</div>
+          <span class="badge badge-success mt-1">✅ Active Session</span>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="signOutMicrosoft()">Sign Out</button>
+      </div>`;
+  } else {
+    cont.innerHTML = `
+      <div class="empty-state" style="padding:20px">
+        <div class="empty-state-icon">🔐</div>
+        <h3>Not signed in to Microsoft</h3>
+        <button class="btn btn-primary mt-3" onclick="signInWithMicrosoft()">Sign in with Microsoft</button>
+      </div>`;
+  }
+}
+
+async function signOutMicrosoft() {
+  await msSignOut();
+  renderConnectionBanner();
+  renderSigninStatus();
+  showToast('Signed out from Microsoft', 'info');
+}
+
+async function runUserSync() {
+  if (!isMsSignedIn()) {
+    showConfirm('You are not signed in with Microsoft. Sign in now?', async () => {
+      await signInWithMicrosoft();
+      if (isMsSignedIn()) runUserSync();
+    });
+    return;
+  }
+  const btn    = document.getElementById('sync-btn');
+  const progBar= document.getElementById('sync-progress-bar');
+  const barFill= document.getElementById('sync-bar-fill');
+  const progTxt= document.getElementById('sync-progress-text');
+  const result = document.getElementById('sync-result');
+  btn.disabled = true; btn.textContent = '⏳ Syncing…';
+  progBar.classList.remove('hidden'); result.classList.add('hidden');
+
+  try {
+    const summary = await syncUsersFromAzureAD((msg, pct) => {
+      barFill.style.width = pct + '%';
+      progTxt.textContent = msg;
+    });
+    result.classList.remove('hidden');
+    result.innerHTML = `<div class="alert alert-success">
+      <span>✅</span>
+      <div>
+        <strong>Sync Complete!</strong><br>
+        📥 <strong>${summary.imported}</strong> new employees imported &nbsp;·&nbsp;
+        🔄 <strong>${summary.updated}</strong> existing users updated &nbsp;·&nbsp;
+        ⏭ <strong>${summary.skipped}</strong> skipped (system accounts)<br>
+        <strong>Total from Azure AD: ${summary.total}</strong>
+      </div>
+    </div>`;
+    document.getElementById('sync-status-badge').innerHTML = `<span class="badge badge-success">✅ Last sync: ${new Date().toLocaleTimeString()}</span>`;
+    showToast(`Sync complete! ${summary.imported} added, ${summary.updated} updated`, 'success', 5000);
+  } catch (err) {
+    result.classList.remove('hidden');
+    result.innerHTML = `<div class="alert alert-danger"><span>❌</span><span><strong>Sync failed:</strong> ${escHtml(err.message)}<br><br><strong>Common fixes:</strong><br>• Ensure User.ReadBasic.All permission is granted with admin consent<br>• Check your Client ID and Tenant ID are correct<br>• Try signing in again</span></div>`;
+    showToast('Sync failed: ' + err.message, 'error', 7000);
+  }
+  btn.disabled=false; btn.textContent='🔄 Sync Users from Azure AD';
+}
+
+async function sendTestEmail() {
+  const to       = document.getElementById('test-email-to').value.trim();
+  const template = document.getElementById('test-template').value;
+  if (!to) { showToast('Enter a recipient email', 'error'); return; }
+  if (!isMsSignedIn()) {
+    document.getElementById('test-ms-signin-required').classList.remove('hidden');
+    return;
+  }
+  const btn    = document.getElementById('test-email-btn');
+  const result = document.getElementById('test-email-result');
+  btn.textContent='📤 Sending…'; btn.disabled=true;
+  try {
+    const dummyUser = { name: 'Test User', id:'test' };
+    const dummyMod  = { id:'m1', title:'Password Security Fundamentals', frameworkControls:[{framework:'NCA-ECC'}], duration:'20 min' };
+    const dummyResult = { percentage:85, passed:true, submittedAt:new Date().toISOString() };
+    const dummyEnroll = { dueDate: new Date(Date.now()+7*86400000).toISOString(), status:'in-progress' };
+    let subject, body;
+    if (template === 'phishing') {
+      const tpl = PHISHING_TEMPLATES['tpl-pwd-reset'];
+      subject = '[TEST] ' + tpl.subject;
+      body    = tpl.body(dummyUser, null, '#');
+    } else if (template === 'certificate') {
+      subject = '🏆 Your Certificate of Completion — Password Security';
+      body    = buildCertificateEmail(dummyUser, dummyMod, dummyResult);
+    } else {
+      subject = '⚠️ [TEST] Training Reminder — ' + dummyMod.title;
+      body    = buildReminderEmail(dummyUser, dummyEnroll, dummyMod);
+    }
+    await sendEmailViaGraph(to, 'Test Recipient', subject, body);
+    result.innerHTML = '<div class="alert alert-success"><span>✅</span><span>Test email sent successfully to <strong>' + escHtml(to) + '</strong>! Check your inbox.</span></div>';
+    showToast('Test email sent!', 'success');
+  } catch (err) {
+    result.innerHTML = '<div class="alert alert-danger"><span>❌</span><span><strong>Failed:</strong> ' + escHtml(err.message) + '</span></div>';
+    showToast('Send failed: ' + err.message, 'error', 6000);
+  }
+  btn.textContent='📤 Send Test Email'; btn.disabled=false;
+}
+
+function copyRedirectUri() {
+  const uri = window.location.origin + (window.location.pathname.includes('/Awareness') ? '/Awareness/' : '/');
+  navigator.clipboard.writeText(uri).then(() => showToast('Redirect URI copied!', 'success')).catch(() => {
+    prompt('Copy this Redirect URI:', uri);
+  });
+}
+</script>
+</body>
+</html>

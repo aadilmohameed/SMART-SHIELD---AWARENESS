@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Profile — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title">My Profile & Certificates</span></div>
+      <div class="header-right">
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+
+      <!-- Profile Hero -->
+      <div class="profile-hero mb-6">
+        <div class="profile-avatar" id="profile-avatar"></div>
+        <div class="profile-info">
+          <h2 id="profile-name"></h2>
+          <p id="profile-sub"></p>
+          <div class="badges" id="profile-badges"></div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <button class="btn btn-outline" style="color:#fff;border-color:rgba(255,255,255,.3)" onclick="openModal('edit-modal')">✏️ Edit Profile</button>
+        </div>
+      </div>
+
+      <!-- Compliance Scores -->
+      <div class="grid-3 mb-6" id="fw-compliance"></div>
+
+      <!-- Certificates -->
+      <div class="section-header mb-4">
+        <h3 class="section-title">🏆 My Certificates</h3>
+      </div>
+      <div id="certs-grid" class="grid-3 mb-6"></div>
+
+      <!-- Certificate Viewer -->
+      <div id="cert-viewer" class="hidden mb-6"></div>
+
+      <!-- Change Password -->
+      <div class="card" style="max-width:480px">
+        <div class="card-header"><h3>🔑 Change Password</h3></div>
+        <div class="card-body">
+          <div class="form-group"><label class="form-label">Current Password</label><input id="curr-pass" class="form-control" type="password" placeholder="Current password"></div>
+          <div class="form-group"><label class="form-label">New Password</label><input id="new-pass" class="form-control" type="password" placeholder="New password (min 6 chars)"></div>
+          <div class="form-group"><label class="form-label">Confirm New Password</label><input id="conf-pass" class="form-control" type="password" placeholder="Confirm new password"></div>
+          <button class="btn btn-primary" onclick="changePassword()">💾 Update Password</button>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- Edit Profile Modal -->
+<div class="modal-backdrop" id="edit-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>Edit Profile</h3><button class="modal-close" onclick="closeModal('edit-modal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Full Name</label><input id="edit-name" class="form-control"></div>
+      <div class="form-group"><label class="form-label">Job Title</label><input id="edit-title" class="form-control"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('edit-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProfile()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Certificate Modal -->
+<div class="modal-backdrop" id="cert-modal">
+  <div class="modal modal-lg">
+    <div class="modal-header"><h3>Certificate of Completion</h3><button class="modal-close" onclick="closeModal('cert-modal')">✕</button></div>
+    <div class="modal-body" id="cert-modal-body"></div>
+    <div class="modal-footer"><button class="btn btn-primary" onclick="window.print()">🖨️ Print Certificate</button></div>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script>
+const user = initPage('employee');
+if (user) renderPage();
+
+function renderPage() {
+  renderHero();
+  renderFwCompliance();
+  renderCertificates();
+  loadEditForm();
+}
+
+function renderHero() {
+  const u    = dbGetOne(DB.USERS, user.id) || user;
+  const risk = u.riskScore || 0;
+  document.getElementById('profile-avatar').textContent = getInitials(u.name);
+  document.getElementById('profile-avatar').style.background = u.color || '#0ea5e9';
+  document.getElementById('profile-name').textContent = u.name;
+  document.getElementById('profile-sub').textContent  = (u.jobTitle||'Employee') + ' · ' + (u.department||'') + ' · ' + capitalize(u.sector||'corporate');
+  document.getElementById('profile-badges').innerHTML = `
+    ${riskBadge(risk)}
+    <span class="badge badge-info">👥 ${u.department||'—'}</span>
+    <span class="badge badge-gray">${capitalize(u.sector||'corporate')} Sector</span>
+    <span class="badge badge-gray">🕐 Last login: ${daysAgo(u.lastLogin)}</span>`;
+}
+
+function renderFwCompliance() {
+  const enrolls  = getUserEnrollments(user.id);
+  const completed = enrolls.filter(e=>e.status==='completed').map(e=>e.moduleId);
+  const fws = [
+    { code:'NCA-ECC', label:'NCA ECC', icon:'🔵' },
+    { code:'SAMA',    label:'SAMA',    icon:'🟣' },
+    { code:'CST',     label:'CST',     icon:'🟠' },
+  ];
+  document.getElementById('fw-compliance').innerHTML = fws.map(f => {
+    const mods = dbGet(DB.MODULES).filter(m=>m.frameworkControls&&m.frameworkControls.some(fc=>fc.framework===f.code)&&m.status==='published');
+    const done = mods.filter(m=>completed.includes(m.id)).length;
+    const pct  = mods.length ? Math.round(done/mods.length*100) : 0;
+    const color= pct>=80?'#22c55e':pct>=40?'#f59e0b':'#ef4444';
+    return `<div class="stat-card">
+      <div style="font-size:2rem">${f.icon}</div>
+      <div class="stat-info flex-1">
+        <div class="stat-val">${pct}%</div>
+        <div class="stat-label">${f.label} Compliance</div>
+        <div class="mt-2">${progressBar(pct)}</div>
+        <div class="text-xs text-muted mt-1">${done} of ${mods.length} modules completed</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderCertificates() {
+  const certs = getUserCertificates(user.id);
+  const grid  = document.getElementById('certs-grid');
+  if (!certs.length) {
+    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;padding:24px"><div class="empty-state-icon">🏆</div><h3>No certificates yet</h3><p>Complete training modules and pass their quizzes to earn certificates</p><a href="training.html" class="btn btn-primary mt-4">Browse Training</a></div>';
+    return;
+  }
+  grid.innerHTML = certs.map(en => {
+    const mod = en.module;
+    if (!mod) return '';
+    return `<div class="card">
+      <div class="card-body text-center">
+        <div style="font-size:2.5rem;margin-bottom:12px">${mod.icon||'📚'}</div>
+        <h4 style="font-size:0.9375rem;margin-bottom:8px">${escHtml(mod.title)}</h4>
+        <div class="text-xs text-muted mb-3">${formatDate(en.certificate.issuedAt)}</div>
+        <span class="badge badge-success">Score: ${en.certificate.score}%</span>
+      </div>
+      <div class="card-footer text-center">
+        <button class="btn btn-outline btn-sm" onclick="viewCertificate('${en.moduleId}')">🏆 View Certificate</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function viewCertificate(moduleId) {
+  const en  = getEnrollment(user.id, moduleId);
+  const mod = dbGetOne(DB.MODULES, moduleId);
+  const u   = dbGetOne(DB.USERS, user.id) || user;
+  const res = getQuizResult(u.id, mod ? mod.quizId : null);
+  const certBody = document.getElementById('cert-modal-body');
+  renderCertificate(certBody, u, mod, res || { percentage: en?.certificate?.score||100, passed:true, submittedAt: en?.certificate?.issuedAt });
+  openModal('cert-modal');
+}
+
+function loadEditForm() {
+  const u = dbGetOne(DB.USERS, user.id) || user;
+  document.getElementById('edit-name').value  = u.name;
+  document.getElementById('edit-title').value = u.jobTitle||'';
+}
+
+function saveProfile() {
+  const u = dbGetOne(DB.USERS, user.id);
+  if (!u) return;
+  u.name     = document.getElementById('edit-name').value.trim() || u.name;
+  u.jobTitle = document.getElementById('edit-title').value.trim();
+  dbSave(DB.USERS, u);
+  setSession(u);
+  closeModal('edit-modal');
+  renderPage();
+  showToast('Profile updated','success');
+}
+
+function changePassword() {
+  const curr = document.getElementById('curr-pass').value;
+  const nw   = document.getElementById('new-pass').value;
+  const conf = document.getElementById('conf-pass').value;
+  const u    = dbGetOne(DB.USERS, user.id);
+  if (!u) return;
+  if (u.password !== curr) { showToast('Current password is incorrect','error'); return; }
+  if (nw.length < 6)       { showToast('New password must be at least 6 characters','error'); return; }
+  if (nw !== conf)          { showToast('Passwords do not match','error'); return; }
+  u.password = nw;
+  dbSave(DB.USERS, u);
+  document.getElementById('curr-pass').value = '';
+  document.getElementById('new-pass').value  = '';
+  document.getElementById('conf-pass').value = '';
+  showToast('Password changed successfully','success');
+}
+</script>
+</body>
+</html>

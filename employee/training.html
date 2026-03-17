@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Training Library — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title">Training Library</span></div>
+      <div class="header-right">
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+
+      <div class="section-header">
+        <h3 class="section-title">All Training Modules</h3>
+        <div class="filter-bar">
+          <div class="input-group"><span class="input-icon">🔍</span><input id="mod-search" class="form-control" placeholder="Search modules…" style="width:200px"></div>
+          <select id="fw-filter" class="form-control" style="width:140px" onchange="renderModules()">
+            <option value="">All Frameworks</option>
+            <option value="NCA-ECC">NCA</option>
+            <option value="SAMA">SAMA</option>
+            <option value="CST">CST</option>
+          </select>
+          <select id="status-filter" class="form-control" style="width:150px" onchange="renderModules()">
+            <option value="">All Status</option>
+            <option value="not-started">Not Started</option>
+            <option value="in-progress">In Progress</option>
+            <option value="completed">Completed</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="module-grid" id="modules-grid"></div>
+
+    </main>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script>
+const user = initPage('employee');
+if (user) renderPage();
+
+function renderPage() {
+  renderModules();
+  document.getElementById('mod-search').addEventListener('input', renderModules);
+}
+
+function renderModules() {
+  const q      = document.getElementById('mod-search').value.toLowerCase();
+  const fw     = document.getElementById('fw-filter').value;
+  const stF    = document.getElementById('status-filter').value;
+  let mods = dbGet(DB.MODULES).filter(m => m.status === 'published');
+  if (q)   mods = mods.filter(m=>(m.title+m.description).toLowerCase().includes(q));
+  if (fw)  mods = mods.filter(m=>m.frameworkControls&&m.frameworkControls.some(fc=>fc.framework===fw));
+
+  const enrollMap = {};
+  getUserEnrollments(user.id).forEach(e => { enrollMap[e.moduleId] = e; });
+
+  if (stF) mods = mods.filter(m => {
+    const e = enrollMap[m.id];
+    const st = e ? e.status : 'not-started';
+    return st === stF;
+  });
+
+  const CATEGORY_COLORS = {
+    'access-control':'linear-gradient(135deg,#0ea5e9,#0369a1)',
+    'threats':'linear-gradient(135deg,#ef4444,#b91c1c)',
+    'data-protection':'linear-gradient(135deg,#8b5cf6,#6d28d9)',
+    'incident-response':'linear-gradient(135deg,#f97316,#c2410c)',
+    'remote-work':'linear-gradient(135deg,#14b8a6,#0f766e)',
+    'endpoint-security':'linear-gradient(135deg,#6366f1,#4338ca)',
+    'cloud-security':'linear-gradient(135deg,#22c55e,#15803d)',
+    'third-party':'linear-gradient(135deg,#f59e0b,#b45309)',
+    'resilience':'linear-gradient(135deg,#0284c7,#075985)',
+  };
+
+  const grid = document.getElementById('modules-grid');
+  if (!mods.length) { grid.innerHTML='<div class="empty-state" style="grid-column:1/-1"><div class="empty-state-icon">📚</div><h3>No modules found</h3></div>'; return; }
+
+  grid.innerHTML = mods.map(m => {
+    const en   = enrollMap[m.id];
+    const st   = en ? en.status : 'not-started';
+    const pct  = en ? en.progress||0 : 0;
+    const fwCodes = [...new Set((m.frameworkControls||[]).map(fc=>fc.framework))];
+    const bg   = m.thumbColor || CATEGORY_COLORS[m.category] || 'linear-gradient(135deg,#374151,#1f2937)';
+    const btnLabel = st==='completed' ? '✅ Completed' : st==='in-progress' ? '▶ Continue' : '▶ Start';
+    const btnClass = st==='completed' ? 'btn-success' : 'btn-primary';
+    return `<div class="module-card">
+      <div class="module-thumb" style="background:${bg}">${m.icon||'📚'}</div>
+      <div class="module-body">
+        <div class="module-title">${escHtml(m.title)}</div>
+        <div class="module-meta">
+          ${difficultyBadge(m.difficulty)}
+          <span class="badge badge-gray">⏱ ${m.duration||'—'}</span>
+          ${m.mandatory?'<span class="badge badge-danger">Mandatory</span>':''}
+        </div>
+        <div class="module-fw-chips">${fwCodes.map(frameworkBadge).join('')}</div>
+        <p class="text-xs text-muted">${truncate(m.description,80)}</p>
+        ${pct>0&&st!=='completed'?progressBar(pct)+'<div class="text-xs text-muted mt-1">'+pct+'% complete</div>':''}
+        <div class="module-actions">
+          ${statusBadge(st)}
+          <a href="learn.html?module=${m.id}" class="btn ${btnClass} btn-sm" style="margin-left:auto">${btnLabel}</a>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+</script>
+</body>
+</html>

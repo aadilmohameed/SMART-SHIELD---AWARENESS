@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title">Platform Settings</span></div>
+      <div class="header-right">
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content" style="max-width:800px">
+
+      <!-- Org Profile -->
+      <div class="card mb-6">
+        <div class="card-header"><h3>Organization Profile</h3></div>
+        <div class="card-body">
+          <div class="settings-section">
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Organization Name</label><input id="org-name" class="form-control" value="Smart Shield Cyber Security"></div>
+              <div class="form-group"><label class="form-label">Sector</label>
+                <select id="org-sector" class="form-control">
+                  <option value="corporate">Corporate / Financial</option>
+                  <option value="government">Government</option>
+                  <option value="both">Both Sectors</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Platform Administrator Email</label><input id="admin-email" class="form-control" value="admin@smartshield.sa"></div>
+              <div class="form-group"><label class="form-label">Support Contact</label><input id="support-email" class="form-control" placeholder="support@smartshield.sa"></div>
+            </div>
+            <button class="btn btn-primary" onclick="saveOrgSettings()">💾 Save Organization Settings</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Framework Toggles -->
+      <div class="card mb-6">
+        <div class="card-header"><h3>Active Frameworks</h3></div>
+        <div class="card-body">
+          <p class="text-muted text-sm mb-4">Enable or disable frameworks in the compliance matrix and module mappings.</p>
+          <div class="toggle-row">
+            <div class="toggle-info"><h4>🔵 NCA ECC / CCC / CSCC</h4><p>Saudi National Cybersecurity Authority — Essential, Cloud, and Critical Systems Controls</p></div>
+            <label class="toggle-switch"><input type="checkbox" id="fw-nca" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info"><h4>🟣 SAMA Cybersecurity Framework</h4><p>Saudi Arabian Monetary Authority — for banking and financial sector organizations</p></div>
+            <label class="toggle-switch"><input type="checkbox" id="fw-sama" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info"><h4>🟠 CST Cybersecurity Framework</h4><p>Communications, Space & Technology Commission — Identify, Protect, Detect, Respond, Recover</p></div>
+            <label class="toggle-switch"><input type="checkbox" id="fw-cst" checked><span class="toggle-slider"></span></label>
+          </div>
+          <button class="btn btn-primary mt-4" onclick="saveFrameworks()">💾 Save Framework Settings</button>
+        </div>
+      </div>
+
+      <!-- Enrollment Settings -->
+      <div class="card mb-6">
+        <div class="card-header"><h3>Enrollment Defaults</h3></div>
+        <div class="card-body">
+          <div class="toggle-row">
+            <div class="toggle-info"><h4>Auto-Enroll New Employees</h4><p>Automatically enroll new employees in all mandatory modules</p></div>
+            <label class="toggle-switch"><input type="checkbox" id="auto-enroll" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info"><h4>Email Reminders</h4><p>Send reminder notifications for overdue trainings (requires backend)</p></div>
+            <label class="toggle-switch"><input type="checkbox" id="email-remind"><span class="toggle-slider"></span></label>
+          </div>
+          <div class="form-row mt-4">
+            <div class="form-group"><label class="form-label">Default Due Date (days from enrollment)</label><input id="due-days" class="form-control" type="number" value="30" min="7" max="365"></div>
+            <div class="form-group"><label class="form-label">Certificate Validity (months)</label><input id="cert-validity" class="form-control" type="number" value="12" min="1" max="36"></div>
+          </div>
+          <button class="btn btn-primary" onclick="saveEnrollSettings()">💾 Save Enrollment Settings</button>
+        </div>
+      </div>
+
+      <!-- Microsoft 365 / Azure Integration -->
+      <div class="card mb-6">
+        <div class="card-header">
+          <h3>☁️ Microsoft 365 Integration</h3>
+          <a href="azure.html" class="btn btn-outline btn-sm">⚙️ Full Azure Settings</a>
+        </div>
+        <div class="card-body">
+          <p class="text-muted text-sm mb-4">Connect your Azure Active Directory to enable Microsoft SSO login, user sync, and phishing simulation emails via Office 365.</p>
+
+          <div id="az-quick-status" class="mb-4"></div>
+
+          <div class="toggle-row mb-4">
+            <div class="toggle-info"><h4>Enable Microsoft 365 Integration</h4><p>Enable SSO login, Azure AD user sync, and O365 email sending</p></div>
+            <label class="toggle-switch"><input type="checkbox" id="az-enabled-toggle" onchange="toggleAzureEnabled(this.checked)"><span class="toggle-slider"></span></label>
+          </div>
+
+          <div id="az-quick-form" class="hidden">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Azure Application (Client) ID *</label>
+                <input id="az-q-client" class="form-control" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Directory (Tenant) ID *</label>
+                <input id="az-q-tenant" class="form-control" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Redirect URI</label>
+              <div class="input-group">
+                <span class="input-icon">🔗</span>
+                <input id="az-q-redirect" class="form-control" readonly>
+              </div>
+              <div class="text-xs text-muted mt-1">Add this URI to your Azure app's Authentication → Redirect URIs</div>
+            </div>
+            <div class="flex gap-3">
+              <button class="btn btn-primary" onclick="saveAzureQuick()">💾 Save & Enable</button>
+              <button class="btn btn-outline" onclick="testAzureQuick()">🔌 Test Connection</button>
+              <a href="azure.html" class="btn btn-ghost">Full Configuration →</a>
+            </div>
+          </div>
+
+          <div id="az-quick-configured" class="hidden">
+            <div class="alert alert-success mb-3" style="font-size:0.875rem">
+              <span>✅</span>
+              <div><strong>Microsoft 365 is configured and enabled.</strong> SSO login, Azure AD sync, and O365 phishing emails are available.</div>
+            </div>
+            <div class="flex gap-3">
+              <a href="azure.html" class="btn btn-outline">⚙️ Manage Azure Settings</a>
+              <button class="btn btn-ghost" onclick="disableAzureIntegration()">Disable Integration</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data Management -->
+      <div class="card mb-6">
+        <div class="card-header"><h3>⚠️ Data Management</h3></div>
+        <div class="card-body">
+          <div class="alert alert-warning mb-4"><span>⚠️</span><span>These actions are irreversible. All data is stored in your browser's localStorage.</span></div>
+          <div class="flex gap-4 flex-wrap">
+            <button class="btn btn-outline" onclick="exportAllData()">📥 Export All Data (JSON)</button>
+            <button class="btn btn-danger" onclick="resetDemoData()">🔄 Reset to Demo Data</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- About -->
+      <div class="card">
+        <div class="card-header"><h3>About CyberAware Platform</h3></div>
+        <div class="card-body">
+          <div class="flex gap-6 flex-wrap">
+            <div><div class="text-muted text-xs mb-1">Platform</div><div class="font-semibold">SmartShield CyberAware</div></div>
+            <div><div class="text-muted text-xs mb-1">Version</div><div class="font-semibold mono">v1.0.0</div></div>
+            <div><div class="text-muted text-xs mb-1">Provider</div><div class="font-semibold">Smart Shield Cyber Security</div></div>
+            <div><div class="text-muted text-xs mb-1">Frameworks</div><div class="font-semibold">NCA · SAMA · CST</div></div>
+            <div><div class="text-muted text-xs mb-1">Type</div><div class="font-semibold">MSSP Awareness Platform</div></div>
+          </div>
+          <div class="mt-4 flex gap-2">
+            <span class="badge badge-nca">NCA ECC 2.0</span>
+            <span class="badge badge-sama">SAMA CSF 1.0</span>
+            <span class="badge badge-cst">CST 1.0</span>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script src="../assets/js/graph.js"></script>
+<script>
+const user = initPage('admin');
+if (user) { loadSettings(); loadAzureQuickSection(); }
+
+function loadSettings() {
+  const s = JSON.parse(localStorage.getItem('cap_settings')||'{}');
+  if (s.orgName)    document.getElementById('org-name').value    = s.orgName;
+  if (s.sector)     document.getElementById('org-sector').value  = s.sector;
+  if (s.adminEmail) document.getElementById('admin-email').value = s.adminEmail;
+  if (s.dueDays)    document.getElementById('due-days').value    = s.dueDays;
+}
+
+function saveOrgSettings() {
+  const s = JSON.parse(localStorage.getItem('cap_settings')||'{}');
+  s.orgName    = document.getElementById('org-name').value;
+  s.sector     = document.getElementById('org-sector').value;
+  s.adminEmail = document.getElementById('admin-email').value;
+  localStorage.setItem('cap_settings', JSON.stringify(s));
+  showToast('Organization settings saved','success');
+}
+
+function saveFrameworks() {
+  const s = JSON.parse(localStorage.getItem('cap_settings')||'{}');
+  s.frameworks = {
+    nca:  document.getElementById('fw-nca').checked,
+    sama: document.getElementById('fw-sama').checked,
+    cst:  document.getElementById('fw-cst').checked,
+  };
+  localStorage.setItem('cap_settings', JSON.stringify(s));
+  showToast('Framework settings saved','success');
+}
+
+function saveEnrollSettings() {
+  const s = JSON.parse(localStorage.getItem('cap_settings')||'{}');
+  s.autoEnroll   = document.getElementById('auto-enroll').checked;
+  s.emailRemind  = document.getElementById('email-remind').checked;
+  s.dueDays      = document.getElementById('due-days').value;
+  s.certValidity = document.getElementById('cert-validity').value;
+  localStorage.setItem('cap_settings', JSON.stringify(s));
+  showToast('Enrollment settings saved','success');
+}
+
+function exportAllData() {
+  const data = {};
+  Object.values(DB).forEach(key => { try { data[key]=JSON.parse(localStorage.getItem(key)); } catch(e) {} });
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='CyberAware-Backup-'+new Date().toISOString().slice(0,10)+'.json';
+  a.click(); showToast('Data exported','success');
+}
+
+function resetDemoData() {
+  showConfirm('Reset all data to demo values? This will delete all current data and restore seed data.', () => {
+    Object.values(DB).forEach(key => localStorage.removeItem(key));
+    localStorage.removeItem('cap_seeded');
+    initSeedData();
+    showToast('Demo data restored successfully','success');
+  }, 'Reset to Demo Data');
+}
+
+/* ── Azure Quick Config ── */
+function loadAzureQuickSection() {
+  const cfg = getAzureConfig();
+  const enabledToggle = document.getElementById('az-enabled-toggle');
+  const quickForm     = document.getElementById('az-quick-form');
+  const configured    = document.getElementById('az-quick-configured');
+  const statusDiv     = document.getElementById('az-quick-status');
+
+  // Set redirect URI
+  const redirectEl = document.getElementById('az-q-redirect');
+  if (redirectEl) redirectEl.value = window.location.origin + window.location.pathname.replace('settings.html','').replace('admin/','') + 'index.html';
+
+  if (cfg.enabled && cfg.clientId && cfg.tenantId) {
+    // Already configured
+    enabledToggle.checked = true;
+    quickForm.classList.add('hidden');
+    configured.classList.remove('hidden');
+    statusDiv.innerHTML = `
+      <div class="flex gap-4 text-sm flex-wrap">
+        <div><span class="text-muted">Client ID:</span> <code class="font-mono" style="font-size:0.8rem">${cfg.clientId.slice(0,8)}…</code></div>
+        <div><span class="text-muted">Tenant ID:</span> <code class="font-mono" style="font-size:0.8rem">${cfg.tenantId.slice(0,8)}…</code></div>
+      </div>`;
+  } else {
+    enabledToggle.checked = cfg.enabled || false;
+    if (cfg.enabled) {
+      quickForm.classList.remove('hidden');
+      configured.classList.add('hidden');
+      if (cfg.clientId) document.getElementById('az-q-client').value = cfg.clientId;
+      if (cfg.tenantId) document.getElementById('az-q-tenant').value = cfg.tenantId;
+    } else {
+      quickForm.classList.add('hidden');
+      configured.classList.add('hidden');
+    }
+    statusDiv.innerHTML = '';
+  }
+}
+
+function toggleAzureEnabled(enabled) {
+  document.getElementById('az-quick-form').classList.toggle('hidden', !enabled);
+  document.getElementById('az-quick-configured').classList.add('hidden');
+  if (!enabled) {
+    const cfg = getAzureConfig();
+    cfg.enabled = false;
+    saveAzureConfig(cfg);
+    showToast('Microsoft 365 integration disabled', 'warning');
+  }
+}
+
+function saveAzureQuick() {
+  const clientId = document.getElementById('az-q-client').value.trim();
+  const tenantId = document.getElementById('az-q-tenant').value.trim();
+  if (!clientId || !tenantId) { showToast('Client ID and Tenant ID are required', 'error'); return; }
+  const cfg = getAzureConfig();
+  cfg.enabled  = true;
+  cfg.clientId = clientId;
+  cfg.tenantId = tenantId;
+  cfg.redirectUri = document.getElementById('az-q-redirect').value;
+  saveAzureConfig(cfg);
+  loadAzureQuickSection();
+  showToast('Microsoft 365 configuration saved!', 'success');
+}
+
+async function testAzureQuick() {
+  const clientId = document.getElementById('az-q-client').value.trim();
+  const tenantId = document.getElementById('az-q-tenant').value.trim();
+  if (!clientId || !tenantId) { showToast('Enter Client ID and Tenant ID first', 'warning'); return; }
+  // Temporarily save to test
+  const cfg = getAzureConfig();
+  cfg.clientId = clientId; cfg.tenantId = tenantId; cfg.enabled = true;
+  saveAzureConfig(cfg);
+  showToast('Testing connection… (sign-in popup will appear)', 'info');
+  try {
+    const result = await testGraphConnection();
+    if (result.ok) {
+      showToast('✅ Connected! Signed in as: ' + result.user, 'success', 5000);
+    } else {
+      showToast('Connection failed: ' + result.error, 'error', 5000);
+    }
+  } catch (err) {
+    showToast('Test failed: ' + (err.message || 'Unknown error'), 'error');
+  }
+}
+
+function disableAzureIntegration() {
+  showConfirm('Disable Microsoft 365 integration? SSO and email features will stop working.', () => {
+    const cfg = getAzureConfig();
+    cfg.enabled = false;
+    saveAzureConfig(cfg);
+    document.getElementById('az-enabled-toggle').checked = false;
+    document.getElementById('az-quick-configured').classList.add('hidden');
+    document.getElementById('az-quick-form').classList.add('hidden');
+    document.getElementById('az-quick-status').innerHTML = '';
+    showToast('Microsoft 365 integration disabled', 'warning');
+  }, 'Disable Integration');
+}
+
+// Azure section loaded on page init above
+</script>
+</body>
+</html>

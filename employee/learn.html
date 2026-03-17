@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Training Module — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left">
+        <a href="training.html" class="btn btn-ghost btn-sm">← Back</a>
+        <span class="page-title" id="header-title">Module Viewer</span>
+      </div>
+      <div class="header-right">
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+
+      <div id="not-found" class="empty-state hidden">
+        <div class="empty-state-icon">⚠️</div>
+        <h3>Module not found</h3>
+        <a href="training.html" class="btn btn-primary mt-4">← Back to Training</a>
+      </div>
+
+      <div id="learn-wrap" class="hidden" style="display:flex;gap:24px;align-items:flex-start">
+
+        <!-- Content Area -->
+        <div style="flex:1;min-width:0">
+          <!-- Module Header Card -->
+          <div class="card mb-5">
+            <div id="mod-banner" style="height:160px;display:flex;align-items:center;justify-content:center;font-size:4rem"></div>
+            <div class="card-body">
+              <h2 id="mod-title"></h2>
+              <div class="flex gap-2 mt-2 flex-wrap" id="mod-meta"></div>
+              <p id="mod-desc" class="mt-3"></p>
+            </div>
+          </div>
+
+          <!-- Module Content -->
+          <div class="card mb-5">
+            <div class="card-header"><h3>📖 Module Content</h3></div>
+            <div class="card-body" id="mod-content"></div>
+          </div>
+
+          <!-- Complete / Quiz Buttons -->
+          <div id="action-bar" class="flex gap-4 flex-wrap"></div>
+        </div>
+
+        <!-- Sidebar Info -->
+        <div style="width:280px;flex-shrink:0" id="right-sidebar">
+          <div class="card mb-4">
+            <div class="card-header"><h4>Framework Controls</h4></div>
+            <div class="card-body" id="fw-controls-list"></div>
+          </div>
+          <div class="card mb-4">
+            <div class="card-header"><h4>Your Progress</h4></div>
+            <div class="card-body" id="progress-info"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h4>Module Info</h4></div>
+            <div class="card-body" id="mod-info"></div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
+<script src="../assets/js/graph.js"></script>
+<script>
+const user = initPage('employee');
+let currentMod = null;
+
+if (user) {
+  const params = new URLSearchParams(window.location.search);
+  const modId  = params.get('module');
+  if (modId) loadModule(modId);
+  else document.getElementById('not-found').classList.remove('hidden');
+}
+
+function loadModule(modId) {
+  const mod = dbGetOne(DB.MODULES, modId);
+  if (!mod) { document.getElementById('not-found').classList.remove('hidden'); return; }
+  currentMod = mod;
+  document.getElementById('learn-wrap').style.display='flex';
+  document.getElementById('learn-wrap').classList.remove('hidden');
+
+  // Enroll if not already
+  const due = new Date(Date.now()+30*86400000).toISOString();
+  if (!getEnrollment(user.id, mod.id)) enrollUser(user.id, mod.id, due, null);
+
+  document.title = mod.title + ' — SmartShield CyberAware';
+  document.getElementById('header-title').textContent = mod.title;
+
+  const CATEGORY_COLORS = {
+    'access-control':'linear-gradient(135deg,#0ea5e9,#0369a1)',
+    'threats':'linear-gradient(135deg,#ef4444,#b91c1c)',
+    'data-protection':'linear-gradient(135deg,#8b5cf6,#6d28d9)',
+    'incident-response':'linear-gradient(135deg,#f97316,#c2410c)',
+    'remote-work':'linear-gradient(135deg,#14b8a6,#0f766e)',
+    'endpoint-security':'linear-gradient(135deg,#6366f1,#4338ca)',
+    'cloud-security':'linear-gradient(135deg,#22c55e,#15803d)',
+    'third-party':'linear-gradient(135deg,#f59e0b,#b45309)',
+    'resilience':'linear-gradient(135deg,#0284c7,#075985)',
+  };
+  const bg = mod.thumbColor || CATEGORY_COLORS[mod.category] || 'linear-gradient(135deg,#374151,#1f2937)';
+  document.getElementById('mod-banner').style.background = bg;
+  document.getElementById('mod-banner').textContent = mod.icon || '📚';
+  document.getElementById('mod-title').textContent = mod.title;
+  document.getElementById('mod-desc').textContent  = mod.description;
+
+  const fwCodes = [...new Set((mod.frameworkControls||[]).map(fc=>fc.framework))];
+  document.getElementById('mod-meta').innerHTML = [
+    difficultyBadge(mod.difficulty),
+    `<span class="badge badge-gray">⏱ ${mod.duration||'—'}</span>`,
+    mod.mandatory?'<span class="badge badge-danger">Mandatory</span>':'',
+    ...fwCodes.map(frameworkBadge),
+  ].join('');
+
+  renderContent(mod);
+  renderFwControls(mod);
+  renderProgress(mod);
+  renderModInfo(mod);
+  renderActionBar(mod);
+
+  // Mark progress as in-progress
+  const en = getEnrollment(user.id, mod.id);
+  if (en && en.status === 'not-started') {
+    en.status   = 'in-progress';
+    en.progress = 25;
+    dbSave(DB.ENROLLMENTS, en);
+  }
+}
+
+function renderContent(mod) {
+  const cont = document.getElementById('mod-content');
+  if (!mod.content) { cont.innerHTML='<p class="text-muted">No content available.</p>'; return; }
+  if (mod.type === 'video' && mod.content.videoUrl) {
+    cont.innerHTML = `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:var(--radius)">
+      <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;border:none" src="${mod.content.videoUrl}" allowfullscreen></iframe>
+    </div>`;
+  } else if (mod.type === 'pdf' && mod.content.pdfUrl) {
+    cont.innerHTML = `<embed src="${mod.content.pdfUrl}" type="application/pdf" width="100%" height="600px" style="border-radius:var(--radius)">
+      <div class="mt-3"><a href="${mod.content.pdfUrl}" target="_blank" class="btn btn-outline btn-sm">📄 Open PDF in new tab</a></div>`;
+  } else if (mod.content.richText) {
+    cont.innerHTML = `<div class="rich-content" style="line-height:1.8;color:var(--gray-700)">${mod.content.richText}</div>`;
+    // Style the rich content
+    cont.querySelectorAll('h3').forEach(el => { el.style.cssText='font-size:1.0625rem;font-weight:700;color:var(--gray-900);margin:20px 0 8px'; });
+    cont.querySelectorAll('p').forEach(el  => { el.style.cssText='margin-bottom:12px'; });
+    cont.querySelectorAll('ul,ol').forEach(el => { el.style.cssText='margin:8px 0 16px 20px'; });
+    cont.querySelectorAll('li').forEach(el  => { el.style.cssText='margin-bottom:6px;list-style-type:disc'; });
+    cont.querySelectorAll('strong').forEach(el => { el.style.color='var(--gray-900)'; });
+  } else {
+    cont.innerHTML='<p class="text-muted">Content not available.</p>';
+  }
+}
+
+function renderFwControls(mod) {
+  const list = document.getElementById('fw-controls-list');
+  const controls = mod.frameworkControls || [];
+  if (!controls.length) { list.innerHTML='<p class="text-muted text-sm">No controls mapped.</p>'; return; }
+  const grouped = {};
+  controls.forEach(c => { (grouped[c.framework] = grouped[c.framework]||[]).push(c); });
+  list.innerHTML = Object.entries(grouped).map(([fw, ctrls]) =>
+    `<div class="mb-3">${frameworkBadge(fw)}<div class="mt-2 flex flex-wrap gap-1">${ctrls.map(c=>`<span class="ctrl-chip ${fw==='NCA-ECC'?'nca':fw==='SAMA'?'sama':'cst'}">${c.control}</span>`).join('')}</div></div>`
+  ).join('');
+}
+
+function renderProgress(mod) {
+  const en  = getEnrollment(user.id, mod.id);
+  const pct = en ? en.progress||0 : 0;
+  const info= document.getElementById('progress-info');
+  info.innerHTML = `
+    ${progressBar(pct)}
+    <div class="text-xs text-muted mt-1 mb-3">${pct}% complete</div>
+    ${statusBadge(en?en.status:'not-started')}
+    ${en&&en.dueDate?`<div class="text-xs text-muted mt-2">Due: ${formatDate(en.dueDate)}</div>`:''}
+    ${en&&en.quizScore!==null?`<div class="mt-2"><span class="badge badge-success">Quiz Score: ${en.quizScore}%</span></div>`:''}`;
+}
+
+function renderModInfo(mod) {
+  document.getElementById('mod-info').innerHTML = `
+    <div class="flex justify-between mb-2 text-sm"><span class="text-muted">Category</span><strong>${capitalize(mod.category||'General')}</strong></div>
+    <div class="flex justify-between mb-2 text-sm"><span class="text-muted">Duration</span><strong>${mod.duration||'—'}</strong></div>
+    <div class="flex justify-between mb-2 text-sm"><span class="text-muted">Pass Mark</span><strong>${mod.passMark||70}%</strong></div>
+    <div class="flex justify-between text-sm"><span class="text-muted">Difficulty</span>${difficultyBadge(mod.difficulty)}</div>`;
+}
+
+function renderActionBar(mod) {
+  const en   = getEnrollment(user.id, mod.id);
+  const quiz = mod.quizId ? dbGetOne(DB.QUIZZES, mod.quizId) : null;
+  const bar  = document.getElementById('action-bar');
+  const buttons = [];
+  if (en && en.status !== 'completed') {
+    buttons.push(`<button class="btn btn-success btn-lg" onclick="markComplete()">✅ Mark as Complete</button>`);
+  }
+  if (quiz) {
+    const prevResult = getQuizResult(user.id, quiz.id);
+    if (en && en.status === 'completed' && prevResult) {
+      buttons.push(`<span class="badge badge-success" style="font-size:1rem;padding:10px 16px">🏆 Quiz Passed: ${prevResult.percentage}%</span>`);
+    } else {
+      buttons.push(`<a href="quiz.html?quiz=${quiz.id}&module=${mod.id}" class="btn btn-primary btn-lg">📝 Take Quiz</a>`);
+    }
+  }
+  bar.innerHTML = buttons.join('') || '';
+}
+
+function markComplete() {
+  if (!currentMod) return;
+  const en = getEnrollment(user.id, currentMod.id);
+  if (!en) return;
+  en.progress   = 100;
+  en.status     = currentMod.quizId ? 'in-progress' : 'completed';
+  if (!currentMod.quizId) {
+    en.completedAt = new Date().toISOString();
+    // Issue certificate and send email for modules without a quiz
+    issueCertificate(user.id, currentMod.id, 100);
+    if (typeof sendEmailViaGraph !== 'undefined' && isAzureConfigured()) {
+      const u = dbGetOne(DB.USERS, user.id) || user;
+      if (u.email) {
+        const fakeResult = { percentage: 100, passed: true, submittedAt: en.completedAt };
+        const body = buildCertificateEmail(u, currentMod, fakeResult);
+        sendEmailViaGraph(u.email, u.name, '🏆 Certificate of Completion — ' + currentMod.title, body).catch(() => {});
+      }
+    }
+  }
+  dbSave(DB.ENROLLMENTS, en);
+  showToast(currentMod.quizId ? 'Module read! Now take the quiz to complete.' : 'Module completed! 🎉', 'success');
+  renderProgress(currentMod);
+  renderActionBar(currentMod);
+  rebuildOrgCompliance();
+}
+</script>
+</body>
+</html>

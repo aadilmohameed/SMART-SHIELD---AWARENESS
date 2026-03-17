@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quiz — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title" id="quiz-header-title">Quiz</span></div>
+      <div class="header-right">
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+      <div id="quiz-not-found" class="empty-state hidden"><div class="empty-state-icon">⚠️</div><h3>Quiz not found</h3><a href="training.html" class="btn btn-primary mt-4">← Back</a></div>
+      <div id="quiz-wrap" class="hidden quiz-wrap">
+        <!-- Active quiz view -->
+        <div id="quiz-active">
+          <div class="quiz-header-bar">
+            <span class="quiz-progress-info" id="q-progress">Question 1 of 5</span>
+            <div class="quiz-timer" id="q-timer">⏱ 10:00</div>
+          </div>
+          <div class="quiz-nav-dots" id="q-dots"></div>
+          <div class="quiz-question-card" id="q-card"></div>
+          <div class="quiz-nav">
+            <button class="btn btn-ghost" id="q-prev" onclick="goQuestion(currentQ-1)">← Previous</button>
+            <button class="btn btn-primary" id="q-next" onclick="goQuestion(currentQ+1)">Next →</button>
+            <button class="btn btn-success hidden" id="q-submit" onclick="submitQuiz()">✅ Submit Quiz</button>
+          </div>
+        </div>
+        <!-- Result view -->
+        <div id="quiz-result" class="hidden"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
+<script src="../assets/js/graph.js"></script>
+<script>
+const user = initPage('employee');
+let quiz, moduleId, currentQ = 0, answers = [], timer, timeLeft, startTime;
+
+if (user) {
+  const params   = new URLSearchParams(window.location.search);
+  const quizId   = params.get('quiz');
+  moduleId       = params.get('module') || null;
+  if (quizId) startQuiz(quizId);
+  else document.getElementById('quiz-not-found').classList.remove('hidden');
+}
+
+function startQuiz(quizId) {
+  quiz = dbGetOne(DB.QUIZZES, quizId);
+  if (!quiz) { document.getElementById('quiz-not-found').classList.remove('hidden'); return; }
+
+  // Check attempts
+  const attempts = getQuizAttempts(user.id, quizId);
+  if (attempts.length >= (quiz.attempts||3)) {
+    document.getElementById('quiz-wrap').classList.remove('hidden');
+    const best = getQuizResult(user.id, quizId);
+    document.getElementById('quiz-active').classList.add('hidden');
+    showResult(best);
+    return;
+  }
+
+  answers   = new Array(quiz.questions.length).fill(null);
+  currentQ  = 0;
+  timeLeft  = (quiz.timeLimit||10) * 60;
+  startTime = Date.now();
+
+  document.getElementById('quiz-header-title').textContent = quiz.title;
+  document.getElementById('quiz-wrap').classList.remove('hidden');
+  document.getElementById('quiz-active').classList.remove('hidden');
+  renderDots();
+  renderQuestion(0);
+  startTimer();
+}
+
+function renderDots() {
+  document.getElementById('q-dots').innerHTML = quiz.questions.map((q,i) =>
+    `<div class="q-dot ${i===currentQ?'current':answers[i]!==null?'answered':''}" onclick="goQuestion(${i})">${i+1}</div>`
+  ).join('');
+}
+
+function renderQuestion(idx) {
+  currentQ = idx;
+  const q = quiz.questions[idx];
+  const total = quiz.questions.length;
+  document.getElementById('q-progress').textContent = `Question ${idx+1} of ${total}`;
+  document.getElementById('q-prev').disabled = idx === 0;
+  document.getElementById('q-next').classList.toggle('hidden', idx === total-1);
+  document.getElementById('q-submit').classList.toggle('hidden', idx !== total-1);
+
+  document.getElementById('q-card').innerHTML = `
+    <div class="q-number">Question ${idx+1} of ${total}</div>
+    <div class="q-text">${escHtml(q.text)}</div>
+    <div class="q-options">
+      ${q.options.map((opt,oi) => `
+        <div class="q-option ${answers[idx]===oi?'selected':''}" onclick="selectAnswer(${idx},${oi})">
+          <div class="q-opt-letter">${String.fromCharCode(65+oi)}</div>
+          <div class="q-opt-text">${escHtml(opt)}</div>
+        </div>`).join('')}
+    </div>`;
+  renderDots();
+}
+
+function selectAnswer(qIdx, optIdx) {
+  answers[qIdx] = optIdx;
+  renderQuestion(qIdx);
+}
+
+function goQuestion(idx) {
+  if (idx < 0 || idx >= quiz.questions.length) return;
+  renderQuestion(idx);
+}
+
+function startTimer() {
+  const el = document.getElementById('q-timer');
+  timer = setInterval(() => {
+    timeLeft--;
+    const m = Math.floor(timeLeft/60).toString().padStart(2,'0');
+    const s = (timeLeft%60).toString().padStart(2,'0');
+    el.textContent = `⏱ ${m}:${s}`;
+    if (timeLeft <= 60) el.classList.add('warning');
+    if (timeLeft <= 0) { clearInterval(timer); submitQuiz(); }
+  }, 1000);
+}
+
+function submitQuiz() {
+  clearInterval(timer);
+  const unanswered = answers.filter(a=>a===null).length;
+  if (unanswered > 0) {
+    showConfirm(`You have ${unanswered} unanswered question(s). Submit anyway?`, () => {
+      clearInterval(timer);
+      doSubmit();
+    }, 'Unanswered Questions');
+    return;
+  }
+  doSubmit();
+}
+
+function doSubmit() {
+  const timeSpent = Math.round((Date.now()-startTime)/1000);
+  let score = 0;
+  quiz.questions.forEach((q,i)=>{ if (answers[i]===q.correct) score++; });
+  const result = saveQuizResult(user.id, quiz.id, moduleId, score, quiz.questions.length, answers, timeSpent);
+  // Send certificate email if passed
+  if (result.passed && moduleId && typeof sendEmailViaGraph !== 'undefined' && isAzureConfigured()) {
+    const mod = dbGetOne(DB.MODULES, moduleId);
+    const u   = dbGetOne(DB.USERS, user.id) || user;
+    if (mod && u.email) {
+      const body = buildCertificateEmail(u, mod, result);
+      sendEmailViaGraph(u.email, u.name, '🏆 Certificate of Completion — ' + mod.title, body)
+        .then(() => showToast('Certificate emailed to ' + u.email, 'success'))
+        .catch(() => {});
+    }
+  }
+  showResult(result);
+}
+
+function showResult(result) {
+  document.getElementById('quiz-active').classList.add('hidden');
+  const resultEl = document.getElementById('quiz-result');
+  resultEl.classList.remove('hidden');
+  const pct    = result.percentage;
+  const passed = result.passed;
+  const mod    = moduleId ? dbGetOne(DB.MODULES, moduleId) : null;
+
+  let reviewHtml = '';
+  if (quiz && result.answers) {
+    reviewHtml = '<div class="mt-4" style="text-align:left"><h4 class="mb-3">📋 Review Answers</h4>';
+    quiz.questions.forEach((q,i) => {
+      const sel    = result.answers[i];
+      const correct= q.correct;
+      const isRight= sel === correct;
+      reviewHtml += `<div class="mb-4 p-4" style="background:${isRight?'var(--success-light)':'var(--danger-light)'};border-radius:var(--radius)">
+        <div class="text-sm font-semibold mb-2">${i+1}. ${escHtml(q.text)}</div>
+        <div class="text-sm mb-1"><span style="color:${isRight?'var(--success)':'var(--danger)'}">${isRight?'✅':'❌'} Your answer:</span> ${sel!==null?escHtml(q.options[sel]):'Not answered'}</div>
+        ${!isRight?`<div class="text-sm text-success">✅ Correct: ${escHtml(q.options[correct])}</div>`:''}
+        ${q.explanation?`<div class="q-explanation show mt-2">${escHtml(q.explanation)}</div>`:''}
+      </div>`;
+    });
+    reviewHtml += '</div>';
+  }
+
+  resultEl.innerHTML = `<div class="quiz-result">
+    <div class="result-emoji">${passed?'🎉':'😓'}</div>
+    <div class="result-status ${passed?'passed':'failed'}">${passed?'🏆 Passed!':'❌ Not Passed'}</div>
+    <div class="result-score">${pct}%</div>
+    <div class="result-total">${result.score} out of ${result.total} correct · Pass Mark: ${quiz?quiz.passMark:70}%</div>
+    ${passed && mod ? `<div class="alert alert-success" style="max-width:400px;margin:0 auto 16px">🏆 Certificate issued for "${mod.title}"</div>` : ''}
+    ${!passed ? `<div class="alert alert-warning" style="max-width:400px;margin:0 auto 16px">Review the module content and try again. You have ${Math.max(0,(quiz?quiz.attempts:3) - getQuizAttempts(user.id, result.quizId).length)} attempt(s) remaining.</div>` : ''}
+    <div class="result-actions">
+      ${moduleId ? `<a href="learn.html?module=${moduleId}" class="btn btn-ghost btn-lg">← Back to Module</a>` : ''}
+      ${!passed && getQuizAttempts(user.id, result.quizId).length < (quiz?quiz.attempts:3) ? `<button class="btn btn-primary btn-lg" onclick="retakeQuiz()">🔄 Retake Quiz</button>` : ''}
+      <a href="assessments.html" class="btn btn-outline btn-lg">📋 My Assessments</a>
+      ${passed ? '<a href="profile.html" class="btn btn-success btn-lg">🏆 View Certificate</a>' : ''}
+    </div>
+    ${reviewHtml}
+  </div>`;
+}
+
+function retakeQuiz() {
+  if (!quiz) return;
+  document.getElementById('quiz-result').classList.add('hidden');
+  document.getElementById('quiz-active').classList.remove('hidden');
+  answers   = new Array(quiz.questions.length).fill(null);
+  currentQ  = 0;
+  timeLeft  = (quiz.timeLimit||10) * 60;
+  startTime = Date.now();
+  renderDots();
+  renderQuestion(0);
+  startTimer();
+}
+</script>
+</body>
+</html>

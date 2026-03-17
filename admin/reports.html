@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports & Analytics — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title">Reports & Analytics</span></div>
+      <div class="header-right">
+        <button class="btn btn-outline btn-sm" onclick="exportReport()">📥 Export Report</button>
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+
+      <div class="tabs mb-6" id="report-tabs">
+        <button class="tab-btn active" data-tab="tab-overview">Overview</button>
+        <button class="tab-btn" data-tab="tab-framework">By Framework</button>
+        <button class="tab-btn" data-tab="tab-dept">By Department</button>
+        <button class="tab-btn" data-tab="tab-phishing">Phishing Report</button>
+      </div>
+
+      <!-- Overview -->
+      <div id="tab-overview" class="tab-panel active">
+        <div class="grid-4 mb-6" id="overview-stats"></div>
+        <div class="grid-2 mb-6">
+          <div class="card"><div class="card-header"><h3>Top 5 Completed Modules</h3></div><div class="card-body" id="top-modules"></div></div>
+          <div class="card"><div class="card-header"><h3>Bottom 5 — Least Completed</h3></div><div class="card-body" id="bottom-modules"></div></div>
+        </div>
+        <div class="card"><div class="card-header"><h3>Employee Compliance Distribution</h3></div><div class="card-body" id="compliance-dist"></div></div>
+      </div>
+
+      <!-- By Framework -->
+      <div id="tab-framework" class="tab-panel">
+        <div class="grid-3 mb-6" id="fw-cards"></div>
+        <div class="card"><div class="card-header"><h3>Framework Domain Completion</h3></div><div class="card-body" id="fw-domains"></div></div>
+      </div>
+
+      <!-- By Department -->
+      <div id="tab-dept" class="tab-panel">
+        <div class="card"><div class="table-wrapper"><table>
+          <thead><tr><th>Department</th><th>Employees</th><th>Compliance %</th><th>Completed</th><th>In Progress</th><th>Overdue</th><th>Phishing Click Rate</th><th>Risk Level</th></tr></thead>
+          <tbody id="dept-tbody"></tbody>
+        </table></div></div>
+      </div>
+
+      <!-- Phishing Report -->
+      <div id="tab-phishing" class="tab-panel">
+        <div class="grid-4 mb-6" id="phish-report-stats"></div>
+        <div class="card"><div class="card-header"><h3>Campaign Performance</h3></div><div class="card-body" id="phish-report-body"></div></div>
+        <div class="card mt-5"><div class="card-header"><h3>High-Risk Employees (Clicked or Submitted)</h3></div><div class="card-body" id="high-risk-body"></div></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script>
+const user = initPage('admin');
+if (user) renderPage();
+
+function renderPage() {
+  renderOverview();
+  renderFrameworkReport();
+  renderDeptReport();
+  renderPhishingReport();
+  initTabs('report-tabs');
+}
+
+function renderOverview() {
+  const enrolls  = dbGet(DB.ENROLLMENTS);
+  const users    = getUsersByRole('employee');
+  const modules  = dbGet(DB.MODULES);
+  const completed= enrolls.filter(e=>e.status==='completed').length;
+  const overdue  = enrolls.filter(e=>e.status==='overdue').length;
+  const overall  = getOrgOverallScore();
+  document.getElementById('overview-stats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-info"><div class="stat-val">${completed}</div><div class="stat-label">Modules Completed</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">🎓</div><div class="stat-info"><div class="stat-val">${users.length}</div><div class="stat-label">Active Employees</div></div></div>
+    <div class="stat-card"><div class="stat-icon orange">📚</div><div class="stat-info"><div class="stat-val">${modules.filter(m=>m.status==='published').length}</div><div class="stat-label">Published Modules</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">⏰</div><div class="stat-info"><div class="stat-val">${overdue}</div><div class="stat-label">Overdue Trainings</div></div></div>`;
+
+  // Top modules
+  const modStats = dbGet(DB.MODULES).map(m => {
+    const enrs = getModuleEnrollments(m.id);
+    const comp = enrs.filter(e=>e.status==='completed').length;
+    return { title:m.title, comp, total:enrs.length };
+  }).filter(s=>s.total>0).sort((a,b)=>b.comp-a.comp);
+  document.getElementById('top-modules').innerHTML    = renderModuleStatList(modStats.slice(0,5));
+  document.getElementById('bottom-modules').innerHTML = renderModuleStatList([...modStats].sort((a,b)=>a.comp-b.comp).slice(0,5));
+
+  // Distribution
+  const buckets = { 'Not Started':0, 'In Progress':0, 'Completed':0, 'Overdue':0 };
+  enrolls.forEach(e => {
+    if (e.status==='completed') buckets['Completed']++;
+    else if (e.status==='overdue') buckets['Overdue']++;
+    else if (e.status==='in-progress') buckets['In Progress']++;
+    else buckets['Not Started']++;
+  });
+  const total = Object.values(buckets).reduce((a,b)=>a+b,0)||1;
+  const colors= {'Not Started':'#9ca3af','In Progress':'#0ea5e9','Completed':'#22c55e','Overdue':'#ef4444'};
+  document.getElementById('compliance-dist').innerHTML = Object.entries(buckets).map(([k,v]) => {
+    const pct = Math.round(v/total*100);
+    return `<div class="bar-chart-row"><div class="bar-label">${k}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${colors[k]}"></div></div><div class="bar-pct">${v} (${pct}%)</div></div>`;
+  }).join('');
+}
+
+function renderModuleStatList(list) {
+  if (!list.length) return '<p class="text-muted">No data</p>';
+  return list.map(s => {
+    const pct = s.total > 0 ? Math.round(s.comp/s.total*100) : 0;
+    return `<div class="mb-3"><div class="flex justify-between mb-1"><span class="text-sm font-medium">${truncate(s.title,40)}</span><span class="text-sm text-muted">${s.comp}/${s.total}</span></div>${progressBar(pct)}</div>`;
+  }).join('');
+}
+
+function renderFrameworkReport() {
+  const fwList = [
+    { code:'NCA-ECC', label:'NCA Essential Cybersecurity Controls', icon:'🔵' },
+    { code:'SAMA',    label:'SAMA Cybersecurity Framework',         icon:'🟣' },
+    { code:'CST',     label:'CST Framework',                       icon:'🟠' },
+  ];
+  document.getElementById('fw-cards').innerHTML = fwList.map(f => {
+    const pct = getOrgComplianceScore(f.code);
+    return `<div class="stat-card"><div class="stat-icon" style="font-size:1.4rem;background:var(--gray-100)">${f.icon}</div><div class="stat-info flex-1"><div class="stat-val">${pct}%</div><div class="stat-label">${f.label}</div>${progressBar(pct)}</div></div>`;
+  }).join('');
+
+  let domainsHtml = '';
+  fwList.forEach(f => {
+    const scores = getFrameworkDomainScores(f.code);
+    domainsHtml += `<h4 class="mt-4 mb-3">${f.icon} ${f.label}</h4>`;
+    scores.forEach(s => {
+      const color = s.pct>=80?'#22c55e':s.pct>=40?'#f59e0b':'#ef4444';
+      domainsHtml += `<div class="bar-chart-row"><div class="bar-label">${s.domain}</div><div class="bar-track"><div class="bar-fill" style="width:${s.pct}%;background:${color}"></div></div><div class="bar-pct">${s.pct}%</div></div>`;
+    });
+  });
+  document.getElementById('fw-domains').innerHTML = domainsHtml;
+}
+
+function renderDeptReport() {
+  const depts = dbGet(DB.DEPARTMENTS);
+  const tbody = document.getElementById('dept-tbody');
+  tbody.innerHTML = depts.map(d => {
+    const users   = getUsersByDept(d.name);
+    const enrolls = dbGet(DB.ENROLLMENTS).filter(e=>users.some(u=>u.id===e.userId));
+    const comp    = enrolls.filter(e=>e.status==='completed').length;
+    const inProg  = enrolls.filter(e=>e.status==='in-progress').length;
+    const overdue = enrolls.filter(e=>e.status==='overdue').length;
+    const compPct = enrolls.length?Math.round(comp/enrolls.length*100):0;
+    const events  = dbGet(DB.PHISHING_EVENTS).filter(e=>users.some(u=>u.id===e.userId));
+    const sent    = events.filter(e=>e.eventType==='sent').length;
+    const clicked = events.filter(e=>e.eventType==='clicked').length;
+    const cr      = sent>0?Math.round(clicked/sent*100):0;
+    const risk    = compPct>=80?'low':compPct>=50?'medium':compPct>=30?'high':'critical';
+    return `<tr>
+      <td><strong>${d.name}</strong></td>
+      <td>${users.length}</td>
+      <td>${complianceBadge(compPct)}</td>
+      <td class="text-success">${comp}</td>
+      <td class="text-primary">${inProg}</td>
+      <td class="text-danger">${overdue}</td>
+      <td><strong class="${cr>20?'text-danger':cr>10?'text-warning':'text-success'}">${cr}%</strong></td>
+      <td>${riskBadgeFromLevel(risk)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderPhishingReport() {
+  const campaigns = dbGet(DB.PHISHING);
+  const events    = dbGet(DB.PHISHING_EVENTS);
+  const allSent     = campaigns.reduce((s,c)=>s+c.targetUserIds.length,0);
+  const allClicked  = events.filter(e=>e.eventType==='clicked').length;
+  const allReported = events.filter(e=>e.eventType==='reported').length;
+  const allSubmit   = events.filter(e=>e.eventType==='submitted').length;
+  const avgCR = allSent>0?Math.round(allClicked/allSent*100):0;
+  document.getElementById('phish-report-stats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon blue">📤</div><div class="stat-info"><div class="stat-val">${allSent}</div><div class="stat-label">Total Simulations Sent</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">🖱️</div><div class="stat-info"><div class="stat-val">${allClicked} (${avgCR}%)</div><div class="stat-label">Total Clicks</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">📝</div><div class="stat-info"><div class="stat-val">${allSubmit}</div><div class="stat-label">Credentials Submitted</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">🚩</div><div class="stat-info"><div class="stat-val">${allReported}</div><div class="stat-label">Correctly Reported</div></div></div>`;
+
+  document.getElementById('phish-report-body').innerHTML = campaigns.map(c => {
+    const s = getCampaignStats(c.id);
+    const cr = s.sent>0?Math.round(s.clicked/s.sent*100):0;
+    return `<div class="mb-4 p-4" style="background:var(--gray-50);border-radius:var(--radius)">
+      <div class="flex items-center justify-between mb-3"><strong>${escHtml(c.name)}</strong>${statusBadge(c.status)}</div>
+      <div class="campaign-stats">
+        <div class="camp-stat"><div class="cs-val">${s.sent}</div><div class="cs-label">Sent</div></div>
+        <div class="camp-stat"><div class="cs-val">${s.opened}</div><div class="cs-label">Opened (${s.sent>0?Math.round(s.opened/s.sent*100):0}%)</div></div>
+        <div class="camp-stat danger"><div class="cs-val">${s.clicked} (${cr}%)</div><div class="cs-label">Clicked</div></div>
+        <div class="camp-stat danger"><div class="cs-val">${s.submitted}</div><div class="cs-label">Submitted</div></div>
+        <div class="camp-stat success"><div class="cs-val">${s.reported}</div><div class="cs-label">Reported</div></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // High-risk employees
+  const riskUsers = getUsersByRole('employee')
+    .map(u => {
+      const ue = events.filter(e=>e.userId===u.id&&(e.eventType==='clicked'||e.eventType==='submitted'));
+      return { ...u, riskEvents: ue.length };
+    })
+    .filter(u => u.riskEvents > 0)
+    .sort((a,b) => b.riskEvents - a.riskEvents);
+  document.getElementById('high-risk-body').innerHTML = riskUsers.length
+    ? '<div class="table-wrapper"><table><thead><tr><th>Employee</th><th>Department</th><th>Click/Submit Events</th><th>Risk Score</th><th>Action</th></tr></thead><tbody>' +
+      riskUsers.map(u => `<tr>
+        <td>${avatarHtml(u,'sm')} <strong style="margin-left:8px">${u.name}</strong></td>
+        <td>${u.department}</td>
+        <td class="text-danger font-semibold">${u.riskEvents}</td>
+        <td>${riskBadge(u.riskScore)}</td>
+        <td><a href="modules.html" class="btn btn-outline btn-sm">📚 Enroll in Phishing Module</a></td>
+      </tr>`).join('') + '</tbody></table></div>'
+    : '<div class="empty-state" style="padding:24px"><div class="empty-state-icon">✅</div><h3>No high-risk employees</h3></div>';
+}
+
+function exportReport() {
+  // Build CSV of employee compliance data
+  const employees = getUsersByRole('employee');
+  const enrollments = dbGet(DB.ENROLLMENTS);
+  const events = dbGet(DB.PHISHING_EVENTS);
+
+  // Summary JSON
+  const report = {
+    generatedAt: new Date().toISOString(),
+    organization: 'Smart Shield Cyber Security',
+    compliance: {
+      'NCA-ECC': getOrgComplianceScore('NCA-ECC') + '%',
+      'SAMA':    getOrgComplianceScore('SAMA') + '%',
+      'CST':     getOrgComplianceScore('CST') + '%',
+      'Overall': getOrgOverallScore() + '%',
+    },
+    employees: employees.length,
+    completedEnrollments: enrollments.filter(e=>e.status==='completed').length,
+    overdueEnrollments:   enrollments.filter(e=>e.status==='overdue').length,
+  };
+
+  // Employee CSV
+  const rows = [['Name','Email','Department','Risk Score','NCA%','SAMA%','CST%','Completed','Overdue','Phishing Clicks','Last Login']];
+  employees.forEach(u => {
+    const enrls = enrollments.filter(e=>e.userId===u.id);
+    const completed = enrls.filter(e=>e.status==='completed').map(e=>e.moduleId);
+    const overdue   = enrls.filter(e=>e.status==='overdue').length;
+    const clicks    = events.filter(e=>e.userId===u.id&&(e.eventType==='clicked'||e.eventType==='submitted')).length;
+    const getScore = fw => {
+      const fwMods = dbGet(DB.MODULES).filter(m=>m.frameworkControls&&m.frameworkControls.some(fc=>fc.framework===fw)&&m.status==='published');
+      const done = fwMods.filter(m=>completed.includes(m.id)).length;
+      return fwMods.length ? Math.round(done/fwMods.length*100) : 0;
+    };
+    rows.push([
+      u.name, u.email, u.department, u.riskScore||0,
+      getScore('NCA-ECC'), getScore('SAMA'), getScore('CST'),
+      completed.length, overdue, clicks,
+      u.lastLogin ? new Date(u.lastLogin).toLocaleDateString('en-SA') : '—'
+    ]);
+  });
+
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('
+');
+  const date = new Date().toISOString().slice(0,10);
+
+  // Download JSON summary
+  const jsonBlob = new Blob([JSON.stringify(report, null, 2)], { type:'application/json' });
+  const a1 = document.createElement('a'); a1.href=URL.createObjectURL(jsonBlob);
+  a1.download=`CyberAware-Summary-${date}.json`; a1.click();
+
+  // Download CSV employee report
+  setTimeout(() => {
+    const csvBlob = new Blob(['﻿'+csv], { type:'text/csv;charset=utf-8;' });
+    const a2 = document.createElement('a'); a2.href=URL.createObjectURL(csvBlob);
+    a2.download=`CyberAware-Employees-${date}.csv`; a2.click();
+    showToast('Report exported: JSON summary + CSV employee data', 'success');
+  }, 500);
+}
+</script>
+</body>
+</html>

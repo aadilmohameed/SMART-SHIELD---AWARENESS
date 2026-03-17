@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Users & Departments — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title">Users & Departments</span></div>
+      <div class="header-right">
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+
+      <!-- Tabs -->
+      <div class="tabs mb-6" id="main-tabs" style="max-width:320px">
+        <button class="tab-btn active" data-tab="employees-panel">Employees</button>
+        <button class="tab-btn" data-tab="depts-panel">Departments</button>
+      </div>
+
+      <!-- Employees Panel -->
+      <div id="employees-panel" class="tab-panel active">
+        <div class="section-header">
+          <h3 class="section-title">All Employees</h3>
+          <div class="filter-bar">
+            <div class="input-group"><span class="input-icon">🔍</span><input id="emp-search" class="form-control" placeholder="Search employees…" style="width:220px"></div>
+            <select id="dept-filter" class="form-control" style="width:160px" onchange="renderEmployees()">
+              <option value="">All Departments</option>
+            </select>
+            <button class="btn btn-primary" onclick="openAddUser()">+ Add Employee</button>
+            <button class="btn btn-outline" id="az-sync-btn" onclick="runAzureSync()" title="Sync users from Azure Active Directory">☁️ Sync from Azure AD</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="table-wrapper"><table>
+            <thead><tr><th>Employee</th><th>Email</th><th>Department</th><th>Risk Score</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+            <tbody id="emp-tbody"></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- Departments Panel -->
+      <div id="depts-panel" class="tab-panel">
+        <div class="section-header">
+          <h3 class="section-title">Departments</h3>
+          <button class="btn btn-primary" onclick="openAddDept()">+ Add Department</button>
+        </div>
+        <div class="grid-4" id="depts-grid"></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- Azure Sync Modal -->
+<div class="modal-backdrop" id="az-sync-modal">
+  <div class="modal">
+    <div class="modal-header"><h3>☁️ Sync from Azure AD</h3><button class="modal-close" onclick="closeModal('az-sync-modal')">✕</button></div>
+    <div class="modal-body">
+      <div id="az-sync-status" style="margin-bottom:16px">
+        <p class="text-sm text-muted mb-3">This will import all users from your Azure Active Directory and create/update matching employee accounts in the platform.</p>
+        <div class="alert alert-info mb-3" style="font-size:0.875rem">
+          <span>ℹ️</span>
+          <div>Requires Microsoft 365 to be configured in <a href="azure.html" style="color:var(--primary)">Azure Integration settings</a>. You must sign in with an admin Microsoft account.</div>
+        </div>
+      </div>
+      <div id="az-sync-progress" class="hidden">
+        <div class="text-sm font-semibold mb-2" id="az-sync-msg">Connecting to Azure AD…</div>
+        <div class="progress"><div class="progress-bar" id="az-sync-bar" style="width:0%;transition:width .4s ease"></div></div>
+        <div class="text-xs text-muted mt-2" id="az-sync-detail"></div>
+      </div>
+      <div id="az-sync-result" class="hidden">
+        <div class="grid-3" id="az-sync-stats"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('az-sync-modal')">Close</button>
+      <button class="btn btn-primary" id="az-sync-confirm-btn" onclick="startAzureSync()">☁️ Start Sync</button>
+    </div>
+  </div>
+</div>
+
+<!-- User Modal -->
+<div class="modal-backdrop" id="user-modal">
+  <div class="modal">
+    <div class="modal-header"><h3 id="user-modal-title">Add Employee</h3><button class="modal-close" onclick="closeModal('user-modal')">✕</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="u-id">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Full Name *</label><input id="u-name" class="form-control" placeholder="Ahmad Al-Rashidi" required></div>
+        <div class="form-group"><label class="form-label">Email *</label><input id="u-email" class="form-control" type="email" placeholder="ahmad@company.sa" required></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Password *</label><input id="u-pass" class="form-control" type="password" placeholder="Minimum 6 characters" required></div>
+        <div class="form-group"><label class="form-label">Job Title</label><input id="u-title" class="form-control" placeholder="IT Administrator"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Department *</label><select id="u-dept" class="form-control"></select></div>
+        <div class="form-group"><label class="form-label">Sector</label>
+          <select id="u-sector" class="form-control"><option value="corporate">Corporate</option><option value="government">Government</option></select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('user-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveUser()">Save Employee</button>
+    </div>
+  </div>
+</div>
+
+<!-- Dept Modal -->
+<div class="modal-backdrop" id="dept-modal">
+  <div class="modal">
+    <div class="modal-header"><h3 id="dept-modal-title">Add Department</h3><button class="modal-close" onclick="closeModal('dept-modal')">✕</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="d-id">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Department Name *</label><input id="d-name" class="form-control" placeholder="Information Technology" required></div>
+        <div class="form-group"><label class="form-label">Code</label><input id="d-code" class="form-control" placeholder="IT" maxlength="10"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('dept-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveDept()">Save Department</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script src="../assets/js/graph.js"></script>
+<script>
+const user = initPage('admin');
+if (user) renderPage();
+
+function renderPage() {
+  populateDeptFilters();
+  renderEmployees();
+  renderDepts();
+  initTabs('main-tabs');
+  document.getElementById('emp-search').addEventListener('input', renderEmployees);
+}
+
+function populateDeptFilters() {
+  const depts = dbGet(DB.DEPARTMENTS);
+  const df = document.getElementById('dept-filter');
+  depts.forEach(d => { const o=document.createElement('option'); o.value=d.name; o.textContent=d.name; df.appendChild(o); });
+  const ud = document.getElementById('u-dept');
+  if (ud) { ud.innerHTML=''; depts.forEach(d => { const o=document.createElement('option'); o.value=d.name; o.textContent=d.name; ud.appendChild(o); }); }
+}
+
+function renderEmployees() {
+  const q      = document.getElementById('emp-search').value.toLowerCase();
+  const deptF  = document.getElementById('dept-filter').value;
+  const colors = ['#0ea5e9','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316'];
+  let emps = getUsersByRole('employee');
+  if (deptF) emps = emps.filter(e => e.department === deptF);
+  if (q)     emps = emps.filter(e => (e.name+e.email+e.department).toLowerCase().includes(q));
+  const tbody = document.getElementById('emp-tbody');
+  if (!emps.length) { tbody.innerHTML='<tr><td colspan="7"><div class="empty-state" style="padding:24px"><div class="empty-state-icon">👥</div><h3>No employees found</h3></div></td></tr>'; return; }
+  tbody.innerHTML = emps.map((e,i) => `<tr>
+    <td style="display:flex;align-items:center;gap:10px">${avatarHtml(e,'sm')}<div><strong>${escHtml(e.name)}</strong><div class="text-xs text-muted">${escHtml(e.jobTitle||'')}</div></div></td>
+    <td class="text-sm">${escHtml(e.email)}</td>
+    <td><span class="badge badge-info">${escHtml(e.department)}</span></td>
+    <td>${riskBadge(e.riskScore||0)}</td>
+    <td>${statusBadge(e.status||'active')}</td>
+    <td class="text-sm text-muted">${daysAgo(e.lastLogin)}</td>
+    <td><div class="actions-cell">
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="editUser('${e.id}')" title="Edit">✏️</button>
+      <button class="btn btn-sm btn-icon ${e.status==='inactive'?'btn-success':'btn-danger'}" onclick="deactivateUser('${e.id}')" title="${e.status==='inactive'?'Reactivate':'Deactivate'}">${e.status==='inactive'?'✅':'🚫'}</button>
+    </div></td>
+  </tr>`).join('');
+}
+
+function renderDepts() {
+  const depts = dbGet(DB.DEPARTMENTS);
+  const html  = depts.map(d => {
+    const users = getUsersByDept(d.name);
+    const enrolls = dbGet(DB.ENROLLMENTS).filter(e=>users.some(u=>u.id===e.userId));
+    const comp = enrolls.length?Math.round(enrolls.filter(e=>e.status==='completed').length/enrolls.length*100):0;
+    return `<div class="card">
+      <div class="card-body">
+        <h3 style="font-size:1rem">${d.name}</h3>
+        <div class="text-xs text-muted mb-4">${d.code}</div>
+        <div class="flex justify-between text-sm mb-2"><span class="text-muted">Employees</span><strong>${users.length}</strong></div>
+        <div class="flex justify-between text-sm mb-2"><span class="text-muted">Compliance</span><strong>${comp}%</strong></div>
+        ${progressBar(comp)}
+      </div>
+      <div class="card-footer"><div class="actions-cell">
+        <button class="btn btn-ghost btn-sm" onclick="editDept('${d.id}')">✏️ Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteDept('${d.id}')">🗑️</button>
+      </div></div>
+    </div>`;
+  }).join('');
+  document.getElementById('depts-grid').innerHTML = html || '<p class="text-muted">No departments added yet.</p>';
+}
+
+function openAddUser() {
+  ['u-id','u-name','u-email','u-pass','u-title'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('user-modal-title').textContent = 'Add Employee';
+  openModal('user-modal');
+}
+
+function editUser(id) {
+  const u = dbGetOne(DB.USERS, id);
+  if (!u) return;
+  document.getElementById('u-id').value    = u.id;
+  document.getElementById('u-name').value  = u.name;
+  document.getElementById('u-email').value = u.email;
+  document.getElementById('u-pass').value  = u.password;
+  document.getElementById('u-title').value = u.jobTitle||'';
+  document.getElementById('u-dept').value  = u.department||'';
+  document.getElementById('u-sector').value= u.sector||'corporate';
+  document.getElementById('user-modal-title').textContent = 'Edit Employee';
+  openModal('user-modal');
+}
+
+function saveUser() {
+  const id    = document.getElementById('u-id').value;
+  const name  = document.getElementById('u-name').value.trim();
+  const email = document.getElementById('u-email').value.trim();
+  const pass  = document.getElementById('u-pass').value;
+  const title = document.getElementById('u-title').value.trim();
+  const dept  = document.getElementById('u-dept').value;
+  const sector= document.getElementById('u-sector').value;
+  if (!name||!email||!pass) { showToast('Please fill all required fields','error'); return; }
+  if (pass.length < 6)      { showToast('Password must be at least 6 characters','error'); return; }
+  // Check for duplicate email on new user
+  if (!id) {
+    const existing = findUserByEmail(email);
+    if (existing) { showToast('An account with this email already exists','error'); return; }
+  }
+  const colors=['#0ea5e9','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899'];
+  const existing = id ? dbGetOne(DB.USERS, id) : null;
+  const u = { id: id||genId('u'), name, email, password:pass, role:'employee', department:dept, jobTitle:title, sector, riskScore: existing?existing.riskScore:0, color: existing?existing.color:colors[Math.floor(Math.random()*colors.length)], lastLogin: existing?existing.lastLogin:null, createdAt: existing?existing.createdAt:new Date().toISOString(), status:'active' };
+  dbSave(DB.USERS, u);
+  closeModal('user-modal');
+  renderEmployees();
+  if (!id) {
+    showToast('Employee added ✅ — Sending welcome email…', 'success');
+    // Send welcome email if Microsoft 365 is configured
+    notifyNewUser(u, pass).then(() => {
+      if (isAzureConfigured()) showToast('Welcome email sent to ' + u.email, 'info');
+    }).catch(() => {});
+  } else {
+    showToast('Employee updated', 'success');
+  }
+}
+
+function deactivateUser(id) {
+  const u = dbGetOne(DB.USERS, id);
+  if (!u) return;
+  if (u.status === 'inactive') {
+    // Reactivate
+    showConfirm('Reactivate this employee? They will regain access to the platform.', () => {
+      u.status = 'active';
+      dbSave(DB.USERS, u);
+      renderEmployees();
+      showToast('Employee reactivated ✅', 'success');
+    }, 'Reactivate Employee');
+  } else {
+    showConfirm('Deactivate this employee? They will lose access to the platform.', () => {
+      u.status = 'inactive';
+      dbSave(DB.USERS, u);
+      renderEmployees();
+      showToast('Employee deactivated', 'warning');
+    }, 'Deactivate Employee');
+  }
+}
+
+function openAddDept() {
+  ['d-id','d-name','d-code'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('dept-modal-title').textContent = 'Add Department';
+  openModal('dept-modal');
+}
+
+function editDept(id) {
+  const d = dbGetOne(DB.DEPARTMENTS, id);
+  if (!d) return;
+  document.getElementById('d-id').value   = d.id;
+  document.getElementById('d-name').value = d.name;
+  document.getElementById('d-code').value = d.code;
+  document.getElementById('dept-modal-title').textContent = 'Edit Department';
+  openModal('dept-modal');
+}
+
+function saveDept() {
+  const id   = document.getElementById('d-id').value;
+  const name = document.getElementById('d-name').value.trim();
+  const code = document.getElementById('d-code').value.trim();
+  if (!name) { showToast('Department name is required','error'); return; }
+  const d = { id: id||genId('dept'), name, code: code||name.slice(0,4).toUpperCase(), headCount:0, riskLevel:'low', compliancePct:0 };
+  dbSave(DB.DEPARTMENTS, d);
+  closeModal('dept-modal');
+  renderDepts();
+  populateDeptFilters();
+  showToast(id?'Department updated':'Department added','success');
+}
+
+function deleteDept(id) {
+  showConfirm('Delete this department? Employees in it will keep their existing dept assignment.', () => {
+    dbDelete(DB.DEPARTMENTS, id);
+    renderDepts();
+    showToast('Department deleted','warning');
+  }, 'Delete Department');
+}
+
+/* ── Azure AD Sync ── */
+function runAzureSync() {
+  if (!isAzureConfigured()) {
+    showToast('Microsoft 365 not configured. Go to Microsoft 365 settings first.', 'warning', 5000);
+    return;
+  }
+  // Reset modal state
+  document.getElementById('az-sync-progress').classList.add('hidden');
+  document.getElementById('az-sync-result').classList.add('hidden');
+  document.getElementById('az-sync-status').classList.remove('hidden');
+  document.getElementById('az-sync-confirm-btn').disabled = false;
+  document.getElementById('az-sync-confirm-btn').textContent = '☁️ Start Sync';
+  openModal('az-sync-modal');
+}
+
+async function startAzureSync() {
+  const confirmBtn = document.getElementById('az-sync-confirm-btn');
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = 'Syncing…';
+  document.getElementById('az-sync-status').classList.add('hidden');
+  document.getElementById('az-sync-progress').classList.remove('hidden');
+  document.getElementById('az-sync-result').classList.add('hidden');
+
+  try {
+    const result = await syncUsersFromAzureAD((msg, pct) => {
+      const bar = document.getElementById('az-sync-bar');
+      const msgEl = document.getElementById('az-sync-msg');
+      const det = document.getElementById('az-sync-detail');
+      if (bar) bar.style.width = (pct || 0) + '%';
+      if (msgEl) msgEl.textContent = msg || 'Syncing…';
+      if (det) det.textContent = `${pct || 0}% complete`;
+    });
+
+    // Show results
+    document.getElementById('az-sync-progress').classList.add('hidden');
+    document.getElementById('az-sync-result').classList.remove('hidden');
+    document.getElementById('az-sync-stats').innerHTML = `
+      <div class="stat-card" style="padding:16px">
+        <div class="stat-icon green">✅</div>
+        <div class="stat-info"><div class="stat-val">${result.imported || 0}</div><div class="stat-label">New Users</div></div>
+      </div>
+      <div class="stat-card" style="padding:16px">
+        <div class="stat-icon blue">🔄</div>
+        <div class="stat-info"><div class="stat-val">${result.updated || 0}</div><div class="stat-label">Updated</div></div>
+      </div>
+      <div class="stat-card" style="padding:16px">
+        <div class="stat-icon orange">⏭️</div>
+        <div class="stat-info"><div class="stat-val">${result.skipped || 0}</div><div class="stat-label">Skipped</div></div>
+      </div>`;
+    confirmBtn.textContent = '✅ Done';
+    renderEmployees();
+    showToast(`Azure sync complete: ${result.imported} new, ${result.updated} updated`, 'success');
+
+  } catch (err) {
+    document.getElementById('az-sync-progress').classList.add('hidden');
+    document.getElementById('az-sync-status').classList.remove('hidden');
+    document.getElementById('az-sync-status').innerHTML = `
+      <div class="alert alert-danger"><span>❌</span><div><strong>Sync failed:</strong> ${escHtml(err.message || 'Unknown error')}</div></div>
+      <p class="text-sm text-muted mt-3">Make sure Microsoft 365 is configured and you have admin consent for User.ReadBasic.All permission.</p>`;
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = '🔄 Retry';
+    showToast('Azure sync failed: ' + (err.message || 'Check configuration'), 'error');
+  }
+}
+</script>
+</body>
+</html>

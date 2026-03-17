@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Assessments — SmartShield CyberAware</title>
+  <link rel="stylesheet" href="../assets/css/main.css">
+  <link rel="stylesheet" href="../assets/css/dashboard.css">
+  <link rel="stylesheet" href="../assets/css/components.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main-content">
+    <header class="top-header">
+      <div class="header-left"><span class="page-title">My Assessments</span></div>
+      <div class="header-right">
+        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+      </div>
+    </header>
+    <main class="page-content">
+
+      <!-- Stats -->
+      <div class="grid-4 mb-6" id="assess-stats"></div>
+
+      <!-- Table -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Assessment History</h3>
+          <div class="filter-bar">
+            <div class="input-group"><span class="input-icon">🔍</span><input id="search" class="form-control" placeholder="Search…" style="width:180px"></div>
+            <select id="fw-filter" class="form-control" style="width:140px" onchange="renderTable()">
+              <option value="">All Frameworks</option>
+              <option value="NCA-ECC">NCA</option>
+              <option value="SAMA">SAMA</option>
+              <option value="CST">CST</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead><tr><th>Module</th><th>Framework Controls</th><th>Attempt</th><th>Score</th><th>Result</th><th>Date</th><th>Time Spent</th><th>Action</th></tr></thead>
+            <tbody id="assess-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/utils.js"></script>
+<script>
+const user = initPage('employee');
+if (user) renderPage();
+
+function renderPage() {
+  renderStats();
+  renderTable();
+  document.getElementById('search').addEventListener('input', renderTable);
+}
+
+function renderStats() {
+  const results  = dbGet(DB.QUIZ_RESULTS).filter(r => r.userId === user.id);
+  const passed   = results.filter(r=>r.passed).length;
+  const failed   = results.filter(r=>!r.passed).length;
+  const avg      = results.length ? Math.round(results.reduce((s,r)=>s+r.percentage,0)/results.length) : 0;
+  document.getElementById('assess-stats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon blue">📝</div><div class="stat-info"><div class="stat-val">${results.length}</div><div class="stat-label">Total Attempts</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-info"><div class="stat-val">${passed}</div><div class="stat-label">Passed</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">❌</div><div class="stat-info"><div class="stat-val">${failed}</div><div class="stat-label">Not Passed</div></div></div>
+    <div class="stat-card"><div class="stat-icon orange">📊</div><div class="stat-info"><div class="stat-val">${avg}%</div><div class="stat-label">Average Score</div></div></div>`;
+}
+
+function renderTable() {
+  const q     = document.getElementById('search').value.toLowerCase();
+  const fwF   = document.getElementById('fw-filter').value;
+  let results = dbGet(DB.QUIZ_RESULTS).filter(r => r.userId === user.id).sort((a,b)=>new Date(b.submittedAt)-new Date(a.submittedAt));
+  const tbody = document.getElementById('assess-tbody');
+  if (!results.length) { tbody.innerHTML='<tr><td colspan="8"><div class="empty-state" style="padding:24px"><div class="empty-state-icon">📋</div><h3>No assessments yet</h3><p>Complete training modules to take quizzes</p><a href="training.html" class="btn btn-primary mt-4">Browse Training</a></div></td></tr>'; return; }
+  if (q) results = results.filter(r => {
+    const mod = r.moduleId ? dbGetOne(DB.MODULES, r.moduleId) : null;
+    return (mod?mod.title:'').toLowerCase().includes(q);
+  });
+  if (fwF) results = results.filter(r => {
+    const mod = r.moduleId ? dbGetOne(DB.MODULES, r.moduleId) : null;
+    return mod && mod.frameworkControls && mod.frameworkControls.some(fc=>fc.framework===fwF);
+  });
+  if (!results.length) { tbody.innerHTML='<tr><td colspan="8" class="text-center text-muted" style="padding:24px">No results match your search</td></tr>'; return; }
+  tbody.innerHTML = results.map(r => {
+    const mod  = r.moduleId ? dbGetOne(DB.MODULES, r.moduleId) : null;
+    const quiz = dbGetOne(DB.QUIZZES, r.quizId);
+    const fwCodes = mod ? [...new Set((mod.frameworkControls||[]).map(fc=>fc.framework))] : [];
+    const mins = Math.floor((r.timeSpent||0)/60);
+    const secs = (r.timeSpent||0)%60;
+    return `<tr>
+      <td><strong>${mod?escHtml(mod.title):'Unknown Module'}</strong></td>
+      <td>${fwCodes.map(frameworkBadge).join('')}</td>
+      <td><span class="badge badge-gray">Attempt ${r.attempt}</span></td>
+      <td><strong class="${r.percentage>=70?'text-success':'text-danger'}">${r.percentage}%</strong> <span class="text-xs text-muted">(${r.score}/${r.total})</span></td>
+      <td>${r.passed?'<span class="badge badge-success">✅ Passed</span>':'<span class="badge badge-danger">❌ Failed</span>'}</td>
+      <td class="text-sm">${formatDate(r.submittedAt)}</td>
+      <td class="text-sm text-muted">${mins}m ${secs}s</td>
+      <td>${mod&&quiz?`<a href="quiz.html?quiz=${quiz.id}&module=${mod.id}" class="btn btn-outline btn-sm">🔄 Retake</a>`:'—'}</td>
+    </tr>`;
+  }).join('');
+}
+</script>
+</body>
+</html>
