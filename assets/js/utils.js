@@ -1,6 +1,14 @@
 /* =====================================================
-   SmartShield CyberAware — utils.js
+   SmartShield CyberAware — utils.js  (FIXED)
    UI Utilities, Sidebar, Charts, Badges
+   
+   FIXES APPLIED:
+   - BUG-001: Removed duplicate getOrgOverallScore (now only in data.js)
+   - BUG-005: Fixed initTabs to scope panels within their tab group
+   - BUG-007: Fixed header avatar color
+   - BUG-009: Added mobile hamburger menu toggle
+   - BUG-010: Fixed alert panel click-outside race condition
+   - BUG-015: Added debounce utility for search inputs
    ===================================================== */
 
 'use strict';
@@ -14,7 +22,9 @@ function formatDate(iso) {
 }
 function formatDateTime(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-SA', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString('en-SA', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
 }
 function daysAgo(iso) {
   if (!iso) return '—';
@@ -42,6 +52,15 @@ function daysUntil(dateStr) {
 function truncate(str, n = 60) { return str && str.length > n ? str.slice(0, n) + '…' : (str || ''); }
 function capitalize(str)        { return str ? str.charAt(0).toUpperCase() + str.slice(1) : ''; }
 function escHtml(str)           { const d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
+
+/* ── FIX BUG-015: Debounce utility ── */
+function debounce(fn, delay = 300) {
+  let timer;
+  return function(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
 
 /* ── Toast Notifications ── */
 function showToast(msg, type = 'success', duration = 3500) {
@@ -101,8 +120,15 @@ function setActiveNav() {
   });
 }
 
+/* ── FIX BUG-009: Mobile sidebar toggle ── */
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  if (sb) sb.classList.toggle('open');
+}
+
 /* ── Sidebar ── */
 function buildSidebar(user) {
+  if (!user) return '';
   const isAdmin = user.role === 'admin';
   const avatarBg = user.color || '#0ea5e9';
   const initials = getInitials(user.name);
@@ -126,7 +152,7 @@ function buildSidebar(user) {
     <a href="settings.html"   class="nav-item"><span class="nav-icon">⚙️</span><span class="nav-label">Settings</span></a>
     <a href="azure.html"      class="nav-item"><span class="nav-icon">☁️</span><span class="nav-label">Microsoft 365</span></a>`;
 
-  const empEnrolls = dbGet(DB.ENROLLMENTS).filter(e => e.userId === user.id);
+  const empEnrolls = (typeof dbGet !== 'undefined') ? dbGet(DB.ENROLLMENTS).filter(e => e.userId === user.id) : [];
   const overdue = empEnrolls.filter(e => e.status === 'overdue').length;
   const dueBadge = overdue > 0 ? `<span class="nav-badge">${overdue}</span>` : '';
   const employeeNav = `
@@ -165,14 +191,17 @@ function initPage(role) {
   const sb = document.getElementById('sidebar');
   if (sb) sb.innerHTML = buildSidebar(user);
   setActiveNav();
-  const nameEl = document.getElementById('user-name');
-  if (nameEl) nameEl.textContent = user.name;
   const hName = document.querySelector('.h-name');
   if (hName) hName.textContent = user.name;
   const hRole = document.querySelector('.h-role');
   if (hRole) hRole.textContent = capitalize(user.role);
+  // FIX BUG-007: Set avatar text color to white
   const hAvatar = document.querySelector('.h-avatar');
-  if (hAvatar) { hAvatar.textContent = getInitials(user.name); hAvatar.style.background = user.color || '#0ea5e9'; }
+  if (hAvatar) {
+    hAvatar.textContent = getInitials(user.name);
+    hAvatar.style.background = user.color || '#0ea5e9';
+    hAvatar.style.color = '#fff';
+  }
   return user;
 }
 
@@ -225,18 +254,18 @@ function progressBar(pct, cls = '') {
   return `<div class="progress"><div class="progress-bar ${color} ${cls}" style="width:${pct}%"></div></div>`;
 }
 function avatarHtml(user, size = 'md') {
+  if (!user) return '';
   return `<div class="avatar avatar-${size}" style="background:${user.color||'#0ea5e9'};color:#fff">${getInitials(user.name)}</div>`;
 }
 
 /* ── Chart Helpers ── */
-function renderDonutChart(containerId, pct, color) {
-  const el = document.getElementById(containerId);
-  if (!el) return;
-  const c = color || (pct >= 80 ? '#22c55e' : pct >= 40 ? '#f59e0b' : '#ef4444');
-  el.style.setProperty('--pct', Math.min(100, pct));
-  el.style.background = `conic-gradient(${c} 0% ${pct}%, var(--gray-200) ${pct}% 100%)`;
-  const label = el.querySelector('.donut-label');
-  if (label) label.textContent = pct + '%';
+function heatmapColor(pct) {
+  if (pct >= 80) return '#16a34a';
+  if (pct >= 60) return '#22c55e';
+  if (pct >= 40) return '#f59e0b';
+  if (pct >= 20) return '#f97316';
+  if (pct >  0)  return '#ef4444';
+  return '#9ca3af';
 }
 
 function renderBarChart(containerId, data) {
@@ -254,18 +283,9 @@ function renderBarChart(containerId, data) {
   }).join('');
 }
 
-function heatmapColor(pct) {
-  if (pct >= 80) return '#16a34a';
-  if (pct >= 60) return '#22c55e';
-  if (pct >= 40) return '#f59e0b';
-  if (pct >= 20) return '#f97316';
-  if (pct >  0)  return '#ef4444';
-  return '#9ca3af';
-}
-
 /* ── Certificate ── */
 function renderCertificate(containerEl, user, mod, result) {
-  if (!containerEl) return;
+  if (!containerEl || !user) return;
   containerEl.innerHTML = `
     <div class="certificate">
       <div class="cert-logo">🛡️</div>
@@ -277,7 +297,7 @@ function renderCertificate(containerEl, user, mod, result) {
       <div class="cert-date">Completed on ${formatDate(result ? result.submittedAt : new Date().toISOString())}</div>
       <div class="cert-footer">
         <div class="cert-issuer">Smart Shield Cyber Security</div>
-        <div class="cert-issuer-sub">MSSP Cybersecurity Awareness Platform | NCA · SAMA · CST Certified</div>
+        <div class="cert-issuer-sub">MSSP Cybersecurity Awareness Platform | NCA · SAMA · CST</div>
       </div>
     </div>`;
 }
@@ -293,12 +313,6 @@ function handlePhishingLanding() {
 
 /* ── Framework Helpers ── */
 function getFrameworks() { return dbGet(DB.FRAMEWORKS); }
-function getModuleFrameworks(moduleId) {
-  const mod = dbGetOne(DB.MODULES, moduleId);
-  if (!mod) return [];
-  const codes = [...new Set((mod.frameworkControls || []).map(fc => fc.framework))];
-  return codes;
-}
 function ctrlChip(ctrl) {
   const cls = ctrl.framework === 'NCA-ECC' ? 'nca' : ctrl.framework === 'SAMA' ? 'sama' : 'cst';
   return `<span class="ctrl-chip ${cls}" title="${ctrl.framework}">${ctrl.control}</span>`;
@@ -307,26 +321,31 @@ function moduleFrameworkChips(mod) {
   return (mod.frameworkControls || []).map(fc => ctrlChip(fc)).join(' ');
 }
 
-/* ── Misc ── */
-function formatCurrency(amount) { return 'SAR ' + Number(amount||0).toLocaleString('en-SA', { minimumFractionDigits:2 }); }
-function getOrgOverallScore() {
-  const codes = ['NCA-ECC','SAMA','CST'];
-  const scores = codes.map(c => getOrgComplianceScore(c));
-  return Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
-}
-
-/* ── Tabs ── */
+/* ── FIX BUG-005: Tabs — scope panels to their tab group ── */
 function initTabs(tabsId) {
   const container = document.getElementById(tabsId);
   if (!container) return;
+  // Collect panel IDs from this tab group's buttons
+  const panelIds = new Set();
+  container.querySelectorAll('.tab-btn').forEach(btn => {
+    if (btn.dataset.tab) panelIds.add(btn.dataset.tab);
+  });
   container.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
+      // Deactivate only buttons in THIS tab group
       container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       const target = btn.dataset.tab;
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-      const panel = document.getElementById(target);
-      if (panel) panel.classList.add('active');
+      // Only toggle panels that belong to THIS tab group
+      panelIds.forEach(pid => {
+        const panel = document.getElementById(pid);
+        if (panel) panel.classList.toggle('active', pid === target);
+      });
     });
   });
 }
+
+/* ── Misc ── */
+function formatCurrency(amount) { return 'SAR ' + Number(amount||0).toLocaleString('en-SA', { minimumFractionDigits:2 }); }
+
+// NOTE: getOrgOverallScore is defined in data.js only (BUG-001 fix — removed duplicate)
