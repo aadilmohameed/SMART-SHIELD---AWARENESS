@@ -1,78 +1,132 @@
+'use strict';
 /* =====================================================
    SmartShield CyberAware — auth.js  (FIXED)
-   Authentication & Session Management
-   
-   FIXES APPLIED:
-   - BUG-024: Fixed redirectAfterLogin for GitHub Pages paths
-   - Improved rootPath() to handle any repo name
+   Fixes:
+   1. redirectAfterLogin() — works on GitHub Pages
+      (/Awareness/), localhost, and custom domains
+   2. rootPath() — robust path detection
+   3. login() — logs employee logins as admin alerts
+   4. requireAuth() — graceful redirect with role check
    ===================================================== */
 
-'use strict';
-
+/**
+ * Authenticate a user against localStorage.
+ * Returns { ok, user } or { ok:false, error }
+ */
 function login(email, password, role) {
   initSeedData();
-  const user = findUserByEmail(email);
-  if (!user) return { ok: false, error: 'No account found with this email address.' };
-  if (user.password !== password) return { ok: false, error: 'Incorrect password. Please try again.' };
-  if (user.role !== role) return { ok: false, error: `This account does not have ${role} access.` };
-  if (user.status === 'inactive') return { ok: false, error: 'Your account has been deactivated. Contact your administrator.' };
+
+  /* Input sanitization */
+  const cleanEmail = (email || '').trim().toLowerCase();
+  const cleanPass  = (password || '').trim();
+
+  if (!cleanEmail || !cleanPass) {
+    return { ok: false, error: 'Please enter your email and password.' };
+  }
+
+  const user = findUserByEmail(cleanEmail);
+
+  if (!user) {
+    return { ok: false, error: 'No account found with this email address.' };
+  }
+  if (user.password !== cleanPass) {
+    return { ok: false, error: 'Incorrect password. Please try again.' };
+  }
+  if (user.role !== role) {
+    return { ok: false, error: `This account does not have ${role} access.` };
+  }
+  if (user.status === 'inactive') {
+    return { ok: false, error: 'Your account has been deactivated. Contact your administrator.' };
+  }
+
+  /* Update last login timestamp */
   user.lastLogin = new Date().toISOString();
   dbSave(DB.USERS, user);
   setSession(user);
-  // Log employee logins as alerts for admin
-  if (user.role !== 'admin') {
-    const loginAlert = { id: genId('al'), type:'info', message: user.name + ' logged in', createdAt: new Date().toISOString(), read: false };
-    dbSave(DB.ALERTS, loginAlert);
+
+  /* Log employee logins as admin alerts (not admin own login) */
+  if (user.role === 'employee') {
+    const alert = {
+      id:        genId('al'),
+      type:      'info',
+      message:   user.name + ' logged in (' + user.department + ')',
+      createdAt: new Date().toISOString(),
+      read:      false,
+    };
+    dbSave(DB.ALERTS, alert);
   }
+
   return { ok: true, user };
 }
 
+/**
+ * Log the current user out and redirect to login page.
+ */
 function logout() {
   clearSession();
-  window.location.href = getBasePath() + 'index.html';
+  window.location.href = rootPath() + 'index.html';
 }
 
+/**
+ * Enforce authentication on a page.
+ * Call at top of every protected page:
+ *   const user = requireAuth('admin');  // or 'employee'
+ * Returns the user object or null (and redirects).
+ */
 function requireAuth(role) {
   initSeedData();
   const user = getSession();
-  if (!user) { window.location.href = getBasePath() + 'index.html'; return null; }
-  if (role && user.role !== role) { window.location.href = getBasePath() + 'index.html'; return null; }
+
+  if (!user) {
+    window.location.href = rootPath() + 'index.html';
+    return null;
+  }
+  if (role && user.role !== role) {
+    /* Wrong role — redirect to their correct dashboard */
+    redirectAfterLogin(user.role);
+    return null;
+  }
   return user;
 }
 
 /**
- * FIX BUG-024: Robust base path detection for GitHub Pages
- * Handles: /SMART-SHIELD---AWARENESS/admin/dashboard.html
- *          /SMART-SHIELD---AWARENESS/index.html
- *          /admin/dashboard.html (local dev)
- *          /index.html (local dev)
+ * Compute the root path prefix.
+ *
+ * Handles all deployment scenarios:
+ *   - GitHub Pages:  /Awareness/admin/  → prefix = ../
+ *   - GitHub Pages:  /Awareness/        → prefix = ''
+ *   - localhost:     /admin/            → prefix = ../
+ *   - Netlify/Vercel/custom domain: same logic applies
  */
-function getBasePath() {
-  const p = window.location.pathname;
-  // Check if we're in a subfolder (admin/ or employee/)
-  const inSubfolder = /\/(admin|employee)\//.test(p);
-  if (inSubfolder) {
-    // Go up one level from admin/ or employee/
-    // e.g. /REPO/admin/dashboard.html → /REPO/
-    return p.replace(/\/(admin|employee)\/.*$/, '/');
-  }
-  // We're at root level — return the directory
-  // e.g. /REPO/index.html → /REPO/
-  // e.g. /index.html → /
-  return p.replace(/\/[^/]*$/, '/');
-}
-
-// Keep backward compatibility
 function rootPath() {
-  return getBasePath();
+  const path = window.location.pathname;
+
+  /* If we are inside a subfolder (admin/ or employee/) */
+  if (path.match(/\/(admin|employee)\//)) {
+    return '../';
+  }
+
+  /* Already at root — GitHub Pages repo subpath or localhost */
+  return '';
 }
 
+/**
+ * Redirect after successful login based on role.
+ * Works for GitHub Pages /Awareness/, localhost, and custom domains.
+ */
 function redirectAfterLogin(role) {
-  const base = getBasePath();
-  if (role === 'admin') window.location.href = base + 'admin/dashboard.html';
-  else                  window.location.href = base + 'employee/dashboard.html';
+  const base = rootPath();
+  if (role === 'admin') {
+    window.location.href = base + 'admin/dashboard.html';
+  } else {
+    window.location.href = base + 'employee/dashboard.html';
+  }
 }
 
+/**
+ * Get the two-letter uppercase initials from a name.
+ */
 function getInitials(name) {
-  return (name || '?').split(' ').slice(0, 2).map(p => p[0]).join('').toUpperCase();
+  if (!name || typeof name !== 'string') return '?';
+  return name.trim().split(/\s+/).slice(0, 2).map(p => p[0].toUpperCase()).join('');
 }
