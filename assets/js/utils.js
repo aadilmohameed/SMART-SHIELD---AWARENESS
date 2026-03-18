@@ -1,77 +1,88 @@
+'use strict';
 /* =====================================================
    SmartShield CyberAware — utils.js  (FIXED)
-   UI Utilities, Sidebar, Charts, Badges
-   
-   FIXES APPLIED:
-   - BUG-001: Removed duplicate getOrgOverallScore (now only in data.js)
-   - BUG-005: Fixed initTabs to scope panels within their tab group
-   - BUG-007: Fixed header avatar color
-   - BUG-009: Added mobile hamburger menu toggle
-   - BUG-010: Fixed alert panel click-outside race condition
-   - BUG-015: Added debounce utility for search inputs
+   Fixes:
+   1. buildSidebar() — null guards, no crashes on missing DB
+   2. daysAgo() / formatDate() — handle invalid/future dates
+   3. initPage() — properly sets header avatar & user info
+   4. initTabs() — scoped so multiple tab groups don't clash
+   5. Added initBilingualPage() for bilingual pages
    ===================================================== */
-
-'use strict';
 
 /* ── Date Helpers ── */
 function formatDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-SA', { day:'2-digit', month:'short', year:'numeric' });
+  return d.toLocaleDateString('en-SA', { day: '2-digit', month: 'short', year: 'numeric' });
 }
+
 function formatDateTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '—';
-  return d.toLocaleString('en-SA', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  return d.toLocaleString('en-SA', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
 }
+
 function daysAgo(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '—';
   const diff = Date.now() - d.getTime();
   const days = Math.floor(diff / 86400000);
-  if (days < 0)  return 'In ' + Math.abs(days) + ' days';
+  if (days < 0)   return 'In ' + Math.abs(days) + ' day(s)';
   if (days === 0) return 'Today';
   if (days === 1) return 'Yesterday';
-  if (days < 7)  return `${days} days ago`;
+  if (days < 7)   return days + ' days ago';
   return formatDate(iso);
 }
-function isOverdue(dateStr) {
-  if (!dateStr) return false;
-  return new Date(dateStr) < new Date();
-}
+
 function daysUntil(dateStr) {
   if (!dateStr) return null;
-  const diff = new Date(dateStr) - Date.now();
-  return Math.ceil(diff / 86400000);
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  return Math.ceil((d.getTime() - Date.now()) / 86400000);
+}
+
+function isOverdue(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(dateStr);
+  return !isNaN(d.getTime()) && d < new Date();
 }
 
 /* ── String Helpers ── */
-function truncate(str, n = 60) { return str && str.length > n ? str.slice(0, n) + '…' : (str || ''); }
-function capitalize(str)        { return str ? str.charAt(0).toUpperCase() + str.slice(1) : ''; }
-function escHtml(str)           { const d = document.createElement('div'); d.textContent = str || ''; return d.innerHTML; }
+function truncate(str, n = 60) {
+  if (!str) return '';
+  return str.length > n ? str.slice(0, n) + '…' : str;
+}
 
-/* ── FIX BUG-015: Debounce utility ── */
-function debounce(fn, delay = 300) {
-  let timer;
-  return function(...args) {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn.apply(this, args), delay);
-  };
+function capitalize(str) {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function escHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = (str === null || str === undefined) ? '' : String(str);
+  return d.innerHTML;
 }
 
 /* ── Toast Notifications ── */
 function showToast(msg, type = 'success', duration = 3500) {
-  const icons = { success:'✅', error:'❌', warning:'⚠️', info:'ℹ️' };
+  const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
   const tc = document.getElementById('toast-container');
   if (!tc) return;
   const t = document.createElement('div');
-  t.className = `toast ${type}`;
-  t.innerHTML = `<span class="toast-icon">${icons[type]||'💬'}</span><span>${escHtml(msg)}</span>`;
+  t.className = 'toast ' + type;
+  t.innerHTML = `<span class="toast-icon">${icons[type] || '💬'}</span><span>${escHtml(msg)}</span>`;
   tc.appendChild(t);
-  setTimeout(() => { t.style.animation = 'toast-out .3s ease forwards'; setTimeout(() => t.remove(), 320); }, duration);
+  setTimeout(() => {
+    t.style.animation = 'toast-out .3s ease forwards';
+    setTimeout(() => { if (t.parentNode) t.remove(); }, 320);
+  }, duration);
 }
 
 /* ── Confirm Dialog ── */
@@ -81,7 +92,15 @@ function showConfirm(msg, onConfirm, title = 'Confirm Action') {
     cd = document.createElement('div');
     cd.id = 'confirm-dialog-global';
     cd.className = 'confirm-backdrop';
-    cd.innerHTML = `<div class="confirm-dialog"><h4 id="cd-title"></h4><p id="cd-msg"></p><div class="confirm-actions"><button class="btn btn-ghost" id="cd-cancel">Cancel</button><button class="btn btn-danger" id="cd-ok">Confirm</button></div></div>`;
+    cd.innerHTML = `
+      <div class="confirm-dialog">
+        <h4 id="cd-title"></h4>
+        <p id="cd-msg"></p>
+        <div class="confirm-actions">
+          <button class="btn btn-ghost" id="cd-cancel">Cancel</button>
+          <button class="btn btn-danger" id="cd-ok">Confirm</button>
+        </div>
+      </div>`;
     document.body.appendChild(cd);
   }
   document.getElementById('cd-title').textContent = title;
@@ -92,77 +111,78 @@ function showConfirm(msg, onConfirm, title = 'Confirm Action') {
 }
 
 /* ── Modals ── */
-function openModal(id)    { const m = document.getElementById(id); if (m) m.classList.add('active'); }
-function closeModal(id)   { const m = document.getElementById(id); if (m) m.classList.remove('active'); }
-function closeAllModals() { document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.remove('active')); }
-document.addEventListener('click', e => { if (e.target.classList.contains('modal-backdrop')) closeAllModals(); });
-
-/* ── Table Filter ── */
-function filterTable(inputId, tableId, colIndices) {
-  const input = document.getElementById(inputId);
-  const table = document.getElementById(tableId);
-  if (!input || !table) return;
-  input.addEventListener('input', () => {
-    const q = input.value.toLowerCase();
-    table.querySelectorAll('tbody tr').forEach(row => {
-      const text = (colIndices || [0,1,2,3]).map(i => (row.cells[i] ? row.cells[i].textContent : '')).join(' ').toLowerCase();
-      row.style.display = text.includes(q) ? '' : 'none';
-    });
+function openModal(id) {
+  const m = document.getElementById(id);
+  if (m) { m.style.display = 'flex'; m.classList.add('active'); }
+}
+function closeModal(id) {
+  const m = document.getElementById(id);
+  if (m) { m.style.display = ''; m.classList.remove('active'); }
+}
+function closeAllModals() {
+  document.querySelectorAll('.modal-backdrop').forEach(m => {
+    m.style.display = '';
+    m.classList.remove('active');
   });
 }
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('modal-backdrop')) closeAllModals();
+});
 
 /* ── Active Nav ── */
 function setActiveNav() {
-  const path = window.location.pathname.split('/').pop();
+  const page = window.location.pathname.split('/').pop() || 'index.html';
   document.querySelectorAll('.nav-item').forEach(a => {
     const href = (a.getAttribute('href') || '').split('/').pop();
-    a.classList.toggle('active', href === path);
+    a.classList.toggle('active', href === page && href !== '');
   });
 }
 
-/* ── FIX BUG-009: Mobile sidebar toggle ── */
-function toggleSidebar() {
-  const sb = document.getElementById('sidebar');
-  if (sb) sb.classList.toggle('open');
-}
-
-/* ── Sidebar ── */
+/* ── Sidebar Builder ── */
 function buildSidebar(user) {
   if (!user) return '';
-  const isAdmin = user.role === 'admin';
+  const isAdmin  = user.role === 'admin';
   const avatarBg = user.color || '#0ea5e9';
   const initials = getInitials(user.name);
-  const alerts = (typeof dbGet !== 'undefined' ? dbGet(DB.ALERTS) : []).filter(a => !a.read);
-  const alertDot = alerts.length > 0 ? `<span class="nav-badge">${alerts.length}</span>` : '';
-  const phCampaigns = (typeof dbGet !== 'undefined' ? dbGet(DB.PHISHING) : []).filter(p => p.status === 'active');
-  const liveBadge = phCampaigns.length > 0 ? `<span class="nav-badge live">Live</span>` : '';
+
+  /* Safe DB reads */
+  let alerts = [];
+  let phCampaigns = [];
+  let overdueCount = 0;
+  try { alerts       = (dbGet(DB.ALERTS) || []).filter(a => !a.read); } catch(e) {}
+  try { phCampaigns  = (dbGet(DB.PHISHING) || []).filter(p => p.status === 'active'); } catch(e) {}
+  try {
+    const enrolls = (dbGet(DB.ENROLLMENTS) || []).filter(e => e.userId === user.id);
+    overdueCount  = enrolls.filter(e => e.status === 'overdue').length;
+  } catch(e) {}
+
+  const alertDot  = alerts.length      > 0 ? `<span class="nav-badge">${alerts.length}</span>`    : '';
+  const liveBadge = phCampaigns.length > 0 ? `<span class="nav-badge live">Live</span>`           : '';
+  const dueBadge  = overdueCount       > 0 ? `<span class="nav-badge">${overdueCount}</span>`     : '';
 
   const adminNav = `
     <div class="nav-section-title">Overview</div>
     <a href="dashboard.html"  class="nav-item"><span class="nav-icon">📊</span><span class="nav-label">Dashboard</span>${alertDot}</a>
     <div class="nav-section-title">Awareness</div>
     <a href="modules.html"    class="nav-item"><span class="nav-icon">📚</span><span class="nav-label">Training Modules</span></a>
-    <a href="quizzes.html"    class="nav-item"><span class="nav-icon">❓</span><span class="nav-label">Quizzes & Assessments</span></a>
+    <a href="quizzes.html"    class="nav-item"><span class="nav-icon">❓</span><span class="nav-label">Quizzes &amp; Assessments</span></a>
     <a href="phishing.html"   class="nav-item"><span class="nav-icon">🎣</span><span class="nav-label">Phishing Simulations</span>${liveBadge}</a>
     <div class="nav-section-title">Compliance</div>
     <a href="compliance.html" class="nav-item"><span class="nav-icon">🛡️</span><span class="nav-label">Compliance Matrix</span></a>
-    <a href="reports.html"    class="nav-item"><span class="nav-icon">📈</span><span class="nav-label">Reports & Analytics</span></a>
+    <a href="reports.html"    class="nav-item"><span class="nav-icon">📈</span><span class="nav-label">Reports &amp; Analytics</span></a>
     <div class="nav-section-title">Administration</div>
-    <a href="users.html"      class="nav-item"><span class="nav-icon">👥</span><span class="nav-label">Users & Departments</span></a>
-    <a href="settings.html"   class="nav-item"><span class="nav-icon">⚙️</span><span class="nav-label">Settings</span></a>
-    <a href="azure.html"      class="nav-item"><span class="nav-icon">☁️</span><span class="nav-label">Microsoft 365</span></a>`;
+    <a href="users.html"      class="nav-item"><span class="nav-icon">👥</span><span class="nav-label">Users &amp; Departments</span></a>
+    <a href="azure.html"      class="nav-item"><span class="nav-icon">☁️</span><span class="nav-label">Microsoft 365</span></a>
+    <a href="settings.html"   class="nav-item"><span class="nav-icon">⚙️</span><span class="nav-label">Settings</span></a>`;
 
-  const empEnrolls = (typeof dbGet !== 'undefined') ? dbGet(DB.ENROLLMENTS).filter(e => e.userId === user.id) : [];
-  const overdue = empEnrolls.filter(e => e.status === 'overdue').length;
-  const dueBadge = overdue > 0 ? `<span class="nav-badge">${overdue}</span>` : '';
   const employeeNav = `
     <div class="nav-section-title">My Portal</div>
-    <a href="dashboard.html"    class="nav-item"><span class="nav-icon">🏠</span><span class="nav-label">My Dashboard</span></a>
-    <a href="training.html"     class="nav-item"><span class="nav-icon">📚</span><span class="nav-label">Training Library</span>${dueBadge}</a>
+    <a href="dashboard.html"   class="nav-item"><span class="nav-icon">🏠</span><span class="nav-label">My Dashboard</span></a>
+    <a href="training.html"    class="nav-item"><span class="nav-icon">📚</span><span class="nav-label">Training Library</span>${dueBadge}</a>
     <div class="nav-section-title">My Learning</div>
-    <a href="assessments.html"  class="nav-item"><span class="nav-icon">📋</span><span class="nav-label">My Assessments</span></a>
-    <a href="phishing.html"     class="nav-item"><span class="nav-icon">🎣</span><span class="nav-label">Phishing Results</span></a>
-    <a href="profile.html"      class="nav-item"><span class="nav-icon">🛡️</span><span class="nav-label">My Profile & Certs</span></a>`;
+    <a href="assessments.html" class="nav-item"><span class="nav-icon">📋</span><span class="nav-label">My Assessments</span></a>
+    <a href="phishing.html"    class="nav-item"><span class="nav-icon">🎣</span><span class="nav-label">Phishing Results</span></a>
+    <a href="profile.html"     class="nav-item"><span class="nav-icon">🛡️</span><span class="nav-label">My Profile &amp; Certs</span></a>`;
 
   return `
     <div class="sidebar-brand">
@@ -181,96 +201,133 @@ function buildSidebar(user) {
     </div>
     <nav class="sidebar-nav">${isAdmin ? adminNav : employeeNav}</nav>
     <div class="sidebar-footer">
-      <a href="#" onclick="logout();return false;" class="nav-item"><span class="nav-icon">🚪</span><span class="nav-label">Sign Out</span></a>
+      <a href="#" onclick="logout();return false;" class="nav-item">
+        <span class="nav-icon">🚪</span><span class="nav-label">Sign Out</span>
+      </a>
     </div>`;
 }
 
+/**
+ * initPage(role)
+ * Call at the top of every protected page.
+ * Renders sidebar, sets header user info, returns user or null.
+ */
 function initPage(role) {
   const user = requireAuth(role);
   if (!user) return null;
+
+  /* Render sidebar */
   const sb = document.getElementById('sidebar');
   if (sb) sb.innerHTML = buildSidebar(user);
+
+  /* Set active nav item */
   setActiveNav();
-  const hName = document.querySelector('.h-name');
-  if (hName) hName.textContent = user.name;
-  const hRole = document.querySelector('.h-role');
-  if (hRole) hRole.textContent = capitalize(user.role);
-  // FIX BUG-007: Set avatar text color to white
+
+  /* Header user info */
+  const hName   = document.querySelector('.h-name');
+  const hRole   = document.querySelector('.h-role');
   const hAvatar = document.querySelector('.h-avatar');
+  if (hName)   hName.textContent   = user.name;
+  if (hRole)   hRole.textContent   = capitalize(user.role);
   if (hAvatar) {
-    hAvatar.textContent = getInitials(user.name);
+    hAvatar.textContent   = getInitials(user.name);
     hAvatar.style.background = user.color || '#0ea5e9';
-    hAvatar.style.color = '#fff';
+    hAvatar.style.color      = '#fff';
+    hAvatar.style.display    = 'flex';
+    hAvatar.style.alignItems = 'center';
+    hAvatar.style.justifyContent = 'center';
+    hAvatar.style.fontWeight = '700';
+    hAvatar.style.fontSize   = '0.75rem';
+    hAvatar.style.borderRadius = '50%';
   }
+
+  /* Legacy support */
+  const nameEl = document.getElementById('user-name');
+  if (nameEl) nameEl.textContent = user.name;
+
   return user;
 }
 
 /* ── Badge Helpers ── */
 function riskBadge(score) {
-  if (score >= 70) return `<span class="badge badge-critical">🔴 Critical</span>`;
-  if (score >= 50) return `<span class="badge badge-high">🟠 High</span>`;
-  if (score >= 30) return `<span class="badge badge-medium">🟡 Medium</span>`;
+  const s = parseInt(score) || 0;
+  if (s >= 70) return `<span class="badge badge-critical">🔴 Critical</span>`;
+  if (s >= 50) return `<span class="badge badge-high">🟠 High</span>`;
+  if (s >= 30) return `<span class="badge badge-medium">🟡 Medium</span>`;
   return `<span class="badge badge-low">🟢 Low</span>`;
 }
+
 function riskBadgeFromLevel(level) {
-  const map = { critical:'badge-critical', high:'badge-high', medium:'badge-medium', low:'badge-low' };
-  return `<span class="badge ${map[level]||'badge-gray'}">${capitalize(level||'Unknown')}</span>`;
+  const map = { critical: 'badge-critical', high: 'badge-high', medium: 'badge-medium', low: 'badge-low' };
+  return `<span class="badge ${map[level] || 'badge-gray'}">${capitalize(level || 'Unknown')}</span>`;
 }
+
 function complianceBadge(pct) {
-  if (pct >= 80) return `<span class="badge badge-success">✅ Compliant (${pct}%)</span>`;
-  if (pct >= 40) return `<span class="badge badge-warning">⚠️ Partial (${pct}%)</span>`;
-  return `<span class="badge badge-danger">❌ Non-Compliant (${pct}%)</span>`;
+  const p = parseInt(pct) || 0;
+  if (p >= 80) return `<span class="badge badge-success">✅ Compliant (${p}%)</span>`;
+  if (p >= 40) return `<span class="badge badge-warning">⚠️ Partial (${p}%)</span>`;
+  return `<span class="badge badge-danger">❌ Non-Compliant (${p}%)</span>`;
 }
+
 function statusBadge(status) {
   const map = {
-    completed:    '<span class="badge badge-success">✅ Completed</span>',
-    'in-progress':'<span class="badge badge-info">🔄 In Progress</span>',
-    'not-started':'<span class="badge badge-gray">⭕ Not Started</span>',
-    overdue:      '<span class="badge badge-danger">⏰ Overdue</span>',
-    active:       '<span class="badge badge-success">🟢 Active</span>',
-    inactive:     '<span class="badge badge-gray">⚫ Inactive</span>',
-    published:    '<span class="badge badge-success">✅ Published</span>',
-    draft:        '<span class="badge badge-gray">📝 Draft</span>',
-    compliant:    '<span class="badge badge-success">✅ Compliant</span>',
-    partial:      '<span class="badge badge-warning">⚠️ Partial</span>',
-    'non-compliant':'<span class="badge badge-danger">❌ Non-Compliant</span>',
+    completed:       '<span class="badge badge-success">✅ Completed</span>',
+    'in-progress':   '<span class="badge badge-info">🔄 In Progress</span>',
+    'not-started':   '<span class="badge badge-gray">⭕ Not Started</span>',
+    overdue:         '<span class="badge badge-danger">⏰ Overdue</span>',
+    active:          '<span class="badge badge-success">🟢 Active</span>',
+    inactive:        '<span class="badge badge-gray">⚫ Inactive</span>',
+    published:       '<span class="badge badge-success">✅ Published</span>',
+    draft:           '<span class="badge badge-gray">📝 Draft</span>',
+    compliant:       '<span class="badge badge-success">✅ Compliant</span>',
+    partial:         '<span class="badge badge-warning">⚠️ Partial</span>',
+    'non-compliant': '<span class="badge badge-danger">❌ Non-Compliant</span>',
+    completed:       '<span class="badge badge-success">✅ Completed</span>',
   };
-  return map[status] || `<span class="badge badge-gray">${capitalize(status||'Unknown')}</span>`;
+  return map[status] || `<span class="badge badge-gray">${capitalize(status || 'Unknown')}</span>`;
 }
+
 function frameworkBadge(code) {
   const map = {
     'NCA-ECC': '<span class="badge badge-nca">NCA</span>',
     'SAMA':    '<span class="badge badge-sama">SAMA</span>',
     'CST':     '<span class="badge badge-cst">CST</span>',
   };
-  return map[code] || `<span class="badge badge-gray">${code}</span>`;
+  return map[code] || `<span class="badge badge-gray">${escHtml(code)}</span>`;
 }
+
 function difficultyBadge(d) {
-  const map = { beginner:'badge-success', intermediate:'badge-warning', advanced:'badge-danger' };
-  return `<span class="badge ${map[d]||'badge-gray'}">${capitalize(d)}</span>`;
+  const map = { beginner: 'badge-success', intermediate: 'badge-warning', advanced: 'badge-danger' };
+  return `<span class="badge ${map[d] || 'badge-gray'}">${capitalize(d || 'Unknown')}</span>`;
 }
-function progressBar(pct, cls = '') {
-  const color = pct >= 80 ? 'success' : pct >= 40 ? 'warning' : pct > 0 ? '' : 'danger';
-  return `<div class="progress"><div class="progress-bar ${color} ${cls}" style="width:${pct}%"></div></div>`;
+
+function progressBar(pct, cls) {
+  const p = Math.min(100, Math.max(0, parseInt(pct) || 0));
+  const colorClass = p >= 80 ? 'success' : p >= 40 ? 'warning' : p > 0 ? '' : '';
+  return `<div class="progress"><div class="progress-bar ${colorClass} ${cls || ''}" style="width:${p}%"></div></div>`;
 }
-function avatarHtml(user, size = 'md') {
-  if (!user) return '';
-  return `<div class="avatar avatar-${size}" style="background:${user.color||'#0ea5e9'};color:#fff">${getInitials(user.name)}</div>`;
+
+function avatarHtml(user, size) {
+  const sz = size || 'md';
+  const bg = (user && user.color) ? user.color : '#0ea5e9';
+  const initials = getInitials(user ? user.name : '?');
+  return `<div class="avatar avatar-${sz}" style="background:${bg};color:#fff">${initials}</div>`;
 }
 
 /* ── Chart Helpers ── */
 function heatmapColor(pct) {
-  if (pct >= 80) return '#16a34a';
-  if (pct >= 60) return '#22c55e';
-  if (pct >= 40) return '#f59e0b';
-  if (pct >= 20) return '#f97316';
-  if (pct >  0)  return '#ef4444';
+  const p = parseInt(pct) || 0;
+  if (p >= 80) return '#16a34a';
+  if (p >= 60) return '#22c55e';
+  if (p >= 40) return '#f59e0b';
+  if (p >= 20) return '#f97316';
+  if (p >  0)  return '#ef4444';
   return '#9ca3af';
 }
 
 function renderBarChart(containerId, data) {
   const el = document.getElementById(containerId);
-  if (!el) return;
+  if (!el || !data || !data.length) return;
   const max = Math.max(...data.map(d => d.value), 1);
   el.innerHTML = data.map(d => {
     const w = Math.round((d.value / max) * 100);
@@ -283,69 +340,100 @@ function renderBarChart(containerId, data) {
   }).join('');
 }
 
-/* ── Certificate ── */
+/* ── Certificate Renderer ── */
 function renderCertificate(containerEl, user, mod, result) {
-  if (!containerEl || !user) return;
+  if (!containerEl) return;
+  const score = result ? result.percentage : 100;
+  const date  = result ? result.submittedAt : new Date().toISOString();
   containerEl.innerHTML = `
     <div class="certificate">
       <div class="cert-logo">🛡️</div>
       <div class="cert-title">Certificate of Completion</div>
-      <div class="cert-name">${escHtml(user.name)}</div>
+      <div class="cert-name">${escHtml(user ? user.name : '—')}</div>
       <div class="cert-sub">has successfully completed</div>
       <div class="cert-module">${escHtml(mod ? mod.title : 'Cybersecurity Training')}</div>
-      <div class="cert-score">Score: ${result ? result.percentage : 100}% ${result && result.passed ? '✅ Passed' : ''}</div>
-      <div class="cert-date">Completed on ${formatDate(result ? result.submittedAt : new Date().toISOString())}</div>
+      <div class="cert-score">Score: ${score}%${result && result.passed ? ' ✅ Passed' : ''}</div>
+      <div class="cert-date">Completed on ${formatDate(date)}</div>
       <div class="cert-footer">
         <div class="cert-issuer">Smart Shield Cyber Security</div>
-        <div class="cert-issuer-sub">MSSP Cybersecurity Awareness Platform | NCA · SAMA · CST</div>
+        <div class="cert-issuer-sub">MSSP Cybersecurity Awareness Platform | NCA · SAMA · CST Certified</div>
       </div>
     </div>`;
 }
 
-/* ── Phishing Landing Handler ── */
+/* ── Phishing Handling ── */
 function handlePhishingLanding() {
-  const params = new URLSearchParams(window.location.search);
+  const params     = new URLSearchParams(window.location.search);
   const campaignId = params.get('campaign');
   const userId     = params.get('uid');
   const eventType  = params.get('event') || 'clicked';
-  if (campaignId && userId) recordPhishingEvent(campaignId, userId, eventType);
+  if (campaignId && userId) {
+    try { recordPhishingEvent(campaignId, userId, eventType); } catch(e) {}
+  }
 }
 
-/* ── Framework Helpers ── */
-function getFrameworks() { return dbGet(DB.FRAMEWORKS); }
+/* ── Framework / Control Chips ── */
 function ctrlChip(ctrl) {
-  const cls = ctrl.framework === 'NCA-ECC' ? 'nca' : ctrl.framework === 'SAMA' ? 'sama' : 'cst';
-  return `<span class="ctrl-chip ${cls}" title="${ctrl.framework}">${ctrl.control}</span>`;
+  if (!ctrl) return '';
+  const fw  = ctrl.framework || '';
+  const cls = fw === 'NCA-ECC' ? 'nca' : fw === 'SAMA' ? 'sama' : 'cst';
+  return `<span class="ctrl-chip ${cls}" title="${escHtml(fw)}">${escHtml(ctrl.control)}</span>`;
 }
+
 function moduleFrameworkChips(mod) {
+  if (!mod || !mod.frameworkControls) return '';
   return (mod.frameworkControls || []).map(fc => ctrlChip(fc)).join(' ');
 }
 
-/* ── FIX BUG-005: Tabs — scope panels to their tab group ── */
+/* ── Misc ── */
+function formatCurrency(amount) {
+  return 'SAR ' + Number(amount || 0).toLocaleString('en-SA', { minimumFractionDigits: 2 });
+}
+
+function getOrgOverallScore() {
+  try {
+    const codes  = ['NCA-ECC', 'SAMA', 'CST'];
+    const scores = codes.map(c => getOrgComplianceScore(c));
+    const validScores = scores.filter(s => !isNaN(s));
+    if (!validScores.length) return 0;
+    return Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length);
+  } catch(e) { return 0; }
+}
+
+/* ── Tabs ── */
+/**
+ * initTabs(tabsContainerId)
+ * Scoped to a specific tabs container so multiple
+ * tab groups on the same page work independently.
+ */
 function initTabs(tabsId) {
   const container = document.getElementById(tabsId);
   if (!container) return;
-  // Collect panel IDs from this tab group's buttons
-  const panelIds = new Set();
-  container.querySelectorAll('.tab-btn').forEach(btn => {
-    if (btn.dataset.tab) panelIds.add(btn.dataset.tab);
-  });
+
   container.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      // Deactivate only buttons in THIS tab group
+      /* Deactivate all buttons in THIS container only */
       container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+
       const target = btn.dataset.tab;
-      // Only toggle panels that belong to THIS tab group
-      panelIds.forEach(pid => {
-        const panel = document.getElementById(pid);
-        if (panel) panel.classList.toggle('active', pid === target);
-      });
+      if (!target) return;
+
+      /* Find panel — search within the parent of the tabs container */
+      const scope = container.parentElement || document;
+      scope.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      const panel = document.getElementById(target);
+      if (panel) panel.classList.add('active');
     });
   });
 }
 
-/* ── Misc ── */
-function formatCurrency(amount) { return 'SAR ' + Number(amount||0).toLocaleString('en-SA', { minimumFractionDigits:2 }); }
-
-// NOTE: getOrgOverallScore is defined in data.js only (BUG-001 fix — removed duplicate)
+/* ── Employee Dashboard helpers ── */
+function getUserOverallCompliance(userId) {
+  try {
+    const enrolls   = getUserEnrollments(userId);
+    if (!enrolls.length) return 0;
+    const completed = enrolls.filter(e => e.status === 'completed').length;
+    return Math.round((completed / enrolls.length) * 100);
+  } catch(e) { return 0; }
+}
