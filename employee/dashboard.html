@@ -8,11 +8,6 @@
   <link rel="stylesheet" href="../assets/css/components.css">
 </head>
 <body>
-<!--
-  FIX BUG-027: This is a NEW proper employee dashboard.
-  The old file was a copy of the admin dashboard calling initPage('admin'),
-  which caused an infinite redirect loop for employee logins.
--->
 <div id="toast-container"></div>
 <div class="app-shell">
   <aside class="sidebar" id="sidebar"></aside>
@@ -20,7 +15,10 @@
     <header class="top-header">
       <div class="header-left"><span class="page-title">My Dashboard</span></div>
       <div class="header-right">
-        <div class="header-user"><div class="h-avatar"></div><div><div class="h-name"></div><div class="h-role"></div></div></div>
+        <div class="header-user">
+          <div class="h-avatar"></div>
+          <div><div class="h-name"></div><div class="h-role"></div></div>
+        </div>
       </div>
     </header>
     <main class="page-content">
@@ -29,7 +27,8 @@
       <div class="welcome-banner">
         <div class="welcome-text">
           <h2 id="welcome-msg">Welcome back!</h2>
-          <p>Smart Shield Cyber Security · Cybersecurity Awareness Training</p>
+          <!-- FIX 1: Added id="welcome-sub" so JS can update it dynamically -->
+          <p id="welcome-sub">Smart Shield Cyber Security · Cybersecurity Awareness Training</p>
         </div>
         <div class="welcome-shield">🛡️</div>
       </div>
@@ -45,14 +44,14 @@
         </div>
         <div class="card">
           <div class="card-header">
-            <h3>⏰ Upcoming & Overdue</h3>
+            <h3>⏰ Upcoming &amp; Overdue</h3>
             <a href="training.html" class="btn btn-ghost btn-sm">View All →</a>
           </div>
           <div class="card-body" id="due-list"></div>
         </div>
       </div>
 
-      <!-- Row 3: My Modules + Recent Activity -->
+      <!-- Row 3: My Modules + Certificates -->
       <div class="grid-2 mb-6">
         <div class="card">
           <div class="card-header">
@@ -88,7 +87,10 @@ const user = initPage('employee');
 if (user) renderPage();
 
 function renderPage() {
-  document.getElementById('welcome-msg').textContent = 'Welcome back, ' + user.name + '!';
+  // FIX 2: Added welcome-sub update so it shows dept + sector dynamically
+  document.getElementById('welcome-msg').textContent  = 'Welcome back, ' + user.name + '!';
+  document.getElementById('welcome-sub').textContent  = (user.department || 'General') + ' · ' + capitalize(user.sector || 'corporate') + ' Sector';
+
   renderStats();
   renderFwCompliance();
   renderDueList();
@@ -98,116 +100,239 @@ function renderPage() {
 }
 
 function renderStats() {
-  const enrolls   = getUserEnrollments(user.id);
-  const completed = enrolls.filter(e => e.status === 'completed').length;
-  const inProgress= enrolls.filter(e => e.status === 'in-progress').length;
-  const overdue   = enrolls.filter(e => e.status === 'overdue').length;
-  const total     = enrolls.length || 1;
-  const compPct   = Math.round((completed / total) * 100);
+  const enrolls    = getUserEnrollments(user.id);
+  const completed  = enrolls.filter(e => e.status === 'completed').length;
+  const inProgress = enrolls.filter(e => e.status === 'in-progress').length;
+  const overdue    = enrolls.filter(e => e.status === 'overdue').length;
+  const total      = enrolls.length || 1;
+  const compPct    = Math.round((completed / total) * 100);
 
   document.getElementById('stats-grid').innerHTML = `
-    <div class="stat-card"><div class="stat-icon green">✅</div><div class="stat-info"><div class="stat-val">${completed}</div><div class="stat-label">Completed</div></div></div>
-    <div class="stat-card"><div class="stat-icon blue">🔄</div><div class="stat-info"><div class="stat-val">${inProgress}</div><div class="stat-label">In Progress</div></div></div>
-    <div class="stat-card"><div class="stat-icon red">⏰</div><div class="stat-info"><div class="stat-val">${overdue}</div><div class="stat-label">Overdue</div><div class="stat-delta ${overdue>0?'down':'up'}">${overdue>0?'▼ Action Required':'▲ All Clear'}</div></div></div>
-    <div class="stat-card"><div class="stat-icon purple">🛡️</div><div class="stat-info"><div class="stat-val">${compPct}%</div><div class="stat-label">Overall Progress</div>${progressBar(compPct)}</div></div>`;
+    <div class="stat-card">
+      <div class="stat-icon green">✅</div>
+      <div class="stat-info">
+        <div class="stat-val">${completed}</div>
+        <div class="stat-label">Completed</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon blue">🔄</div>
+      <div class="stat-info">
+        <div class="stat-val">${inProgress}</div>
+        <div class="stat-label">In Progress</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon ${overdue > 0 ? 'red' : 'green'}">⏰</div>
+      <div class="stat-info">
+        <div class="stat-val">${overdue}</div>
+        <div class="stat-label">Overdue</div>
+        <div class="stat-delta ${overdue > 0 ? 'down' : 'up'}">
+          ${overdue > 0 ? '▼ Action Required' : '▲ All Clear'}
+        </div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon purple">🛡️</div>
+      <div class="stat-info">
+        <div class="stat-val">${compPct}%</div>
+        <div class="stat-label">Overall Progress</div>
+        ${progressBar(compPct)}
+      </div>
+    </div>`;
 }
 
 function renderFwCompliance() {
   const enrolls   = getUserEnrollments(user.id);
   const completed = enrolls.filter(e => e.status === 'completed').map(e => e.moduleId);
   const fws = [
-    { code:'NCA-ECC', label:'NCA ECC', icon:'🔵' },
-    { code:'SAMA',    label:'SAMA CSF', icon:'🟣' },
-    { code:'CST',     label:'CST',      icon:'🟠' },
+    { code: 'NCA-ECC', label: 'NCA ECC',  icon: '🔵' },
+    { code: 'SAMA',    label: 'SAMA CSF', icon: '🟣' },
+    { code: 'CST',     label: 'CST',      icon: '🟠' },
   ];
+
   document.getElementById('fw-compliance').innerHTML = fws.map(f => {
-    const mods = dbGet(DB.MODULES).filter(m => m.frameworkControls && m.frameworkControls.some(fc => fc.framework === f.code) && m.status === 'published');
-    const done = mods.filter(m => completed.includes(m.id)).length;
-    const pct  = mods.length ? Math.round(done / mods.length * 100) : 0;
+    const mods = dbGet(DB.MODULES).filter(m =>
+      m.frameworkControls &&
+      m.frameworkControls.some(fc => fc.framework === f.code) &&
+      m.status === 'published'
+    );
+    const done  = mods.filter(m => completed.includes(m.id)).length;
+    const pct   = mods.length ? Math.round(done / mods.length * 100) : 0;
     const color = pct >= 80 ? '#22c55e' : pct >= 40 ? '#f59e0b' : '#ef4444';
-    return `<div class="bar-chart-row">
-      <div class="bar-label">${f.icon} ${f.label}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
-      <div class="bar-pct">${pct}%</div>
-    </div>`;
+    return `
+      <div class="bar-chart-row">
+        <div class="bar-label">${f.icon} ${f.label}</div>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+        <div class="bar-pct">${pct}%</div>
+      </div>`;
   }).join('');
 }
 
 function renderDueList() {
   const enrolls = getUserEnrollments(user.id)
     .filter(e => e.status !== 'completed' && e.dueDate)
-    .sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate))
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
     .slice(0, 6);
+
   const el = document.getElementById('due-list');
-  if (!enrolls.length) { el.innerHTML = '<div class="empty-state" style="padding:16px"><div class="empty-state-icon">✅</div><h3>All caught up!</h3></div>'; return; }
+  if (!enrolls.length) {
+    el.innerHTML = `
+      <div class="empty-state" style="padding:16px">
+        <div class="empty-state-icon">✅</div>
+        <h3>All caught up!</h3>
+        <p>No upcoming or overdue trainings</p>
+      </div>`;
+    return;
+  }
+
   el.innerHTML = enrolls.map(e => {
-    const mod = dbGetOne(DB.MODULES, e.moduleId);
+    const mod  = dbGetOne(DB.MODULES, e.moduleId);
     if (!mod) return '';
     const days = daysUntil(e.dueDate);
     const isOD = e.status === 'overdue';
-    return `<div class="flex items-center gap-3 mb-3 p-3" style="background:${isOD?'var(--danger-light)':'var(--gray-50)'};border-radius:var(--radius);border-left:3px solid ${isOD?'var(--danger)':'var(--warning)'}">
-      <span style="font-size:1.25rem">${mod.icon||'📚'}</span>
-      <div class="flex-1">
-        <div class="text-sm font-semibold">${escHtml(mod.title)}</div>
-        <div class="text-xs ${isOD?'text-danger':'text-muted'}">${isOD ? Math.abs(days)+' day(s) overdue' : days+' day(s) remaining'}</div>
-      </div>
-      ${statusBadge(e.status)}
-      <a href="learn.html?module=${mod.id}" class="btn btn-primary btn-sm">${e.status==='in-progress'?'Continue':'Start'}</a>
-    </div>`;
+
+    // FIX 3: null-safe days display — shows fallback text if days is null
+    const daysText = isOD
+      ? (days !== null ? Math.abs(days) + ' day(s) overdue' : 'Overdue')
+      : (days !== null ? days + ' day(s) remaining'         : 'Due soon');
+
+    return `
+      <div class="flex items-center gap-3 mb-3 p-3"
+           style="background:${isOD ? 'var(--danger-light)' : 'var(--gray-50)'};
+                  border-radius:var(--radius);
+                  border-left:3px solid ${isOD ? 'var(--danger)' : 'var(--warning)'}">
+        <span style="font-size:1.25rem">${mod.icon || '📚'}</span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold">${escHtml(mod.title)}</div>
+          <div class="text-xs ${isOD ? 'text-danger' : 'text-muted'}">${daysText}</div>
+        </div>
+        ${statusBadge(e.status)}
+        <a href="learn.html?module=${mod.id}" class="btn btn-primary btn-sm">
+          ${e.status === 'in-progress' ? 'Continue' : 'Start'}
+        </a>
+      </div>`;
   }).join('');
 }
 
 function renderMyModules() {
-  const enrolls = getUserEnrollments(user.id).sort((a,b) => new Date(b.enrolledAt) - new Date(a.enrolledAt)).slice(0, 5);
+  const enrolls = getUserEnrollments(user.id)
+    .sort((a, b) => new Date(b.enrolledAt) - new Date(a.enrolledAt))
+    .slice(0, 5);
+
   const el = document.getElementById('my-modules');
-  if (!enrolls.length) { el.innerHTML = '<div class="empty-state" style="padding:16px"><div class="empty-state-icon">📚</div><h3>No modules assigned yet</h3><a href="training.html" class="btn btn-primary btn-sm mt-3">Browse Training</a></div>'; return; }
+  if (!enrolls.length) {
+    el.innerHTML = `
+      <div class="empty-state" style="padding:16px">
+        <div class="empty-state-icon">📚</div>
+        <h3>No modules assigned yet</h3>
+        <a href="training.html" class="btn btn-primary btn-sm mt-3">Browse Training</a>
+      </div>`;
+    return;
+  }
+
   el.innerHTML = enrolls.map(e => {
     const mod = dbGetOne(DB.MODULES, e.moduleId);
     if (!mod) return '';
     const pct = e.progress || 0;
-    return `<div class="flex items-center gap-3 mb-3">
-      <span style="font-size:1.5rem">${mod.icon||'📚'}</span>
-      <div class="flex-1">
-        <div class="text-sm font-semibold">${escHtml(mod.title)}</div>
-        ${progressBar(pct)}
-        <div class="text-xs text-muted mt-1">${pct}% · ${statusBadge(e.status)}</div>
-      </div>
-    </div>`;
+    return `
+      <div class="flex items-center gap-3 mb-3">
+        <span style="font-size:1.5rem">${mod.icon || '📚'}</span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold">${escHtml(mod.title)}</div>
+          ${progressBar(pct)}
+          <div class="flex items-center gap-2 mt-1">
+            <span class="text-xs text-muted">${pct}%</span>
+            ${statusBadge(e.status)}
+          </div>
+        </div>
+        <a href="learn.html?module=${mod.id}" class="btn btn-ghost btn-sm">
+          ${e.status === 'completed' ? '🔍 Review' : '▶ Open'}
+        </a>
+      </div>`;
   }).join('');
 }
 
 function renderMyCerts() {
   const certs = getUserCertificates(user.id);
-  const el = document.getElementById('my-certs');
-  if (!certs.length) { el.innerHTML = '<div class="empty-state" style="padding:16px"><div class="empty-state-icon">🏆</div><h3>No certificates yet</h3><p class="text-xs text-muted">Pass quizzes to earn certificates</p></div>'; return; }
-  el.innerHTML = certs.slice(0,4).map(en => {
+  const el    = document.getElementById('my-certs');
+
+  if (!certs.length) {
+    el.innerHTML = `
+      <div class="empty-state" style="padding:16px">
+        <div class="empty-state-icon">🏆</div>
+        <h3>No certificates yet</h3>
+        <p class="text-xs text-muted">Pass quizzes to earn certificates</p>
+      </div>`;
+    return;
+  }
+
+  el.innerHTML = certs.slice(0, 4).map(en => {
     const mod = en.module;
     if (!mod) return '';
-    return `<div class="flex items-center gap-3 mb-3 p-3" style="background:var(--success-light);border-radius:var(--radius)">
-      <span style="font-size:1.25rem">${mod.icon||'🏆'}</span>
-      <div class="flex-1">
-        <div class="text-sm font-semibold">${escHtml(mod.title)}</div>
-        <div class="text-xs text-muted">${formatDate(en.certificate.issuedAt)} · Score: ${en.certificate.score}%</div>
-      </div>
-      <a href="profile.html" class="btn btn-ghost btn-sm">View</a>
-    </div>`;
+    return `
+      <div class="flex items-center gap-3 mb-3 p-3"
+           style="background:var(--success-light);border-radius:var(--radius)">
+        <span style="font-size:1.25rem">${mod.icon || '🏆'}</span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold">${escHtml(mod.title)}</div>
+          <div class="text-xs text-muted">
+            ${formatDate(en.certificate.issuedAt)} · Score: ${en.certificate.score}%
+          </div>
+        </div>
+        <a href="profile.html" class="btn btn-ghost btn-sm">View</a>
+      </div>`;
   }).join('');
 }
 
 function renderPhishing() {
   const events = getUserPhishingHistory(user.id);
-  const el = document.getElementById('phishing-results');
-  if (!events.length) { el.innerHTML = '<div class="empty-state" style="padding:16px"><div class="empty-state-icon">🎣</div><h3>No phishing simulations yet</h3></div>'; return; }
+  const el     = document.getElementById('phishing-results');
+
+  if (!events.length) {
+    el.innerHTML = `
+      <div class="empty-state" style="padding:16px">
+        <div class="empty-state-icon">🎣</div>
+        <h3>No phishing simulations yet</h3>
+      </div>`;
+    return;
+  }
+
   const sent     = events.filter(e => e.eventType === 'sent').length;
   const clicked  = events.filter(e => e.eventType === 'clicked').length;
   const reported = events.filter(e => e.eventType === 'reported').length;
+  const clickRate = sent > 0 ? Math.round(clicked / sent * 100) : 0;
+
   el.innerHTML = `
     <div class="flex gap-4 flex-wrap mb-4">
-      <div class="camp-stat"><div class="cs-val">${sent}</div><div class="cs-label">Simulations Received</div></div>
-      <div class="camp-stat danger"><div class="cs-val">${clicked}</div><div class="cs-label">Links Clicked</div></div>
-      <div class="camp-stat success"><div class="cs-val">${reported}</div><div class="cs-label">Correctly Reported</div></div>
+      <div class="camp-stat">
+        <div class="cs-val">${sent}</div>
+        <div class="cs-label">Simulations Received</div>
+      </div>
+      <div class="camp-stat ${clicked > 0 ? 'danger' : ''}">
+        <div class="cs-val">${clicked}</div>
+        <div class="cs-label">Links Clicked (${clickRate}%)</div>
+      </div>
+      <div class="camp-stat success">
+        <div class="cs-val">${reported}</div>
+        <div class="cs-label">Correctly Reported</div>
+      </div>
     </div>
-    ${clicked > 0 ? '<div class="alert alert-warning"><span>⚠️</span><span>You clicked on simulated phishing links. Review the <a href="training.html">Phishing Awareness module</a> to improve your detection skills.</span></div>' : '<div class="alert alert-success"><span>✅</span><span>Great job! You haven\'t fallen for any phishing simulations.</span></div>'}`;
+    ${clicked > 0
+      ? `<div class="alert alert-warning">
+           <span>⚠️</span>
+           <span>You clicked on ${clicked} simulated phishing link(s).
+             Review the <a href="training.html" style="font-weight:600;color:var(--primary)">
+             Phishing Awareness module</a> to improve your detection skills.
+           </span>
+         </div>`
+      : `<div class="alert alert-success">
+           <span>✅</span>
+           <span>Great job! You haven't fallen for any phishing simulations.</span>
+         </div>`
+    }`;
 }
 </script>
 </body>
